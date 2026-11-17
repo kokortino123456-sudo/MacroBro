@@ -30,6 +30,10 @@ data class LibFood(
     /** Lower-case words without diacritics, padded with spaces for word-start matching. */
     val searchKey: String = FoodLibrary.searchKeyFor(display, name, aliases)
 
+    // Precomputed at load (background thread) so typing in search stays smooth.
+    internal val displayKey: String = " " + FoodLibrary.normalize(display)
+    internal val nameKey: String = " " + FoodLibrary.normalize(name)
+
     val isDish: Boolean get() = source.startsWith("dish")
 
     /** USDA counts fiber inside carbohydrates; EU tables and labels (BLS, Open Food Facts) don't. */
@@ -157,10 +161,8 @@ object FoodLibrary {
         return foods.asSequence()
             .filter { f -> tokens.all { f.searchKey.contains(it) } }
             .map { f ->
-                val display = " " + normalize(f.display)
-                val name = " " + normalize(f.name)
                 val score = when {
-                    display.startsWith(" $first") || name.startsWith(" $first") -> 0
+                    f.displayKey.startsWith(" $first") || f.nameKey.startsWith(" $first") -> 0
                     tokens.all { f.searchKey.contains(" $it") } -> 1
                     else -> 2
                 }
