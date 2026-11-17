@@ -10,7 +10,7 @@ import java.net.URL
 
 class GeminiException(message: String) : Exception(message)
 
-/** Tiny Gemini REST client — no SDK, just HttpURLConnection + org.json. */
+/** Tiny Gemini REST client: no SDK, just HttpURLConnection and org.json. */
 object Gemini {
     private const val BASE = "https://generativelanguage.googleapis.com/v1beta"
 

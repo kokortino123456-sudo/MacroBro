@@ -6,8 +6,9 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -18,21 +19,18 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AutoAwesome
-import androidx.compose.material.icons.filled.CameraAlt
-import androidx.compose.material.icons.filled.PhotoLibrary
-import androidx.compose.material3.Button
+import androidx.compose.material.icons.rounded.AutoAwesome
+import androidx.compose.material.icons.rounded.CameraAlt
+import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.PhotoLibrary
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CheckboxDefaults
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -86,145 +84,143 @@ fun SnapScreen(vm: AppViewModel, onDone: () -> Unit, onOpenSettings: () -> Unit)
         }
     }
 
+    val bmp = vm.snapBitmap
+    val items = vm.snapItems
+    val canAnalyze = (bmp != null || vm.snapNote.isNotBlank()) && vm.hasKey
+
     Column(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+            .padding(Space.l),
+        verticalArrangement = Arrangement.spacedBy(Space.m),
     ) {
-        Text("Snap Food AI", fontWeight = FontWeight.Bold, fontSize = 24.sp)
-        DimText("Take a photo of your meal and the AI estimates the calories and macros. Check the numbers before adding.")
+        ScreenTitle("Snap or describe", sub = "Photo, text, or both. The AI estimates calories and macros, you check them.")
 
         if (!vm.hasKey) {
             SectionCard {
-                Text("Add your free Gemini API key first", fontWeight = FontWeight.SemiBold)
-                DimText("The photo AI runs on Google Gemini. It takes about a minute to set up.")
-                Button(onClick = onOpenSettings) { Text("Open Settings") }
+                Text("Add your free Gemini API key first", fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
+                DimText("Snap and Gym Bro run on Google Gemini. Setup takes about a minute.")
+                PrimaryButton("Open Settings", onOpenSettings, shape = RoundedCornerShape(Radius.inner))
             }
         }
 
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Button(
-                onClick = { openCamera() },
-                modifier = Modifier.weight(1f).height(52.dp),
-                shape = RoundedCornerShape(16.dp),
-            ) {
-                Icon(Icons.Filled.CameraAlt, null)
-                Spacer(Modifier.width(8.dp))
-                Text("Camera", fontWeight = FontWeight.Bold)
-            }
-            OutlinedButton(
-                onClick = { pickImage.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
-                modifier = Modifier.weight(1f).height(52.dp),
-                shape = RoundedCornerShape(16.dp),
-            ) {
-                Icon(Icons.Filled.PhotoLibrary, null)
-                Spacer(Modifier.width(8.dp))
-                Text("Gallery")
-            }
-        }
-
-        val bmp = vm.snapBitmap
         if (bmp != null) {
-            Image(
-                bitmap = bmp.asImageBitmap(),
-                contentDescription = "Your food photo",
-                contentScale = ContentScale.Crop,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(240.dp)
-                    .clip(RoundedCornerShape(20.dp)),
-            )
-            OutlinedTextField(
-                value = vm.snapNote,
-                onValueChange = { vm.snapNote = it.take(200) },
-                label = { Text("Details (optional)") },
-                placeholder = { Text("e.g. fried in butter, 2 eggs, big plate") },
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(12.dp),
-            )
-            Button(
-                onClick = { vm.analyzeSnap() },
-                enabled = !vm.snapLoading && vm.hasKey,
-                modifier = Modifier.fillMaxWidth().height(52.dp),
-                shape = RoundedCornerShape(16.dp),
-            ) {
-                if (vm.snapLoading) {
-                    CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onPrimary)
-                    Spacer(Modifier.width(10.dp))
-                    Text("Analyzing…")
-                } else {
-                    Icon(Icons.Filled.AutoAwesome, null)
-                    Spacer(Modifier.width(8.dp))
-                    Text(if (vm.snapItems.isEmpty()) "Analyze food" else "Analyze again", fontWeight = FontWeight.Bold)
-                }
+            Box {
+                Image(
+                    bitmap = bmp.asImageBitmap(),
+                    contentDescription = "Your food photo",
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(240.dp)
+                        .clip(RoundedCornerShape(Radius.card)),
+                )
+                IconButton(
+                    onClick = { vm.removeSnapPhoto() },
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(Space.s)
+                        .clip(CircleShape)
+                        .background(Bg.copy(alpha = 0.7f)),
+                ) { Icon(Icons.Rounded.Close, "Remove photo", tint = TextMain) }
             }
         }
 
-        vm.snapError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
+            SecondaryButton(if (bmp == null) "Camera" else "Retake", { openCamera() }, Modifier.weight(1f), icon = Icons.Rounded.CameraAlt)
+            SecondaryButton(
+                "Gallery",
+                { pickImage.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+                Modifier.weight(1f),
+                icon = Icons.Rounded.PhotoLibrary,
+            )
+        }
 
-        if (vm.snapNotes.isNotBlank()) DimText("🤖 ${vm.snapNotes}")
+        AppTextField(
+            value = vm.snapNote,
+            onValueChange = { vm.snapNote = it.take(400) },
+            label = if (bmp == null) "Or describe what you ate" else "Details (optional)",
+            placeholder = if (bmp == null) "2 eggs, 2 slices of toast with butter, coffee with milk" else "fried in butter, big plate",
+            singleLine = false,
+            maxLines = 5,
+            shape = RoundedCornerShape(Radius.page),
+            modifier = Modifier.fillMaxWidth(),
+        )
 
-        val items = vm.snapItems
+        PrimaryButton(
+            text = when {
+                vm.snapLoading -> "Analyzing…"
+                items.isEmpty() -> "Estimate with AI"
+                else -> "Estimate again"
+            },
+            onClick = { vm.analyzeSnap() },
+            icon = Icons.Rounded.AutoAwesome,
+            enabled = canAnalyze,
+            loading = vm.snapLoading,
+            modifier = Modifier.fillMaxWidth(),
+        )
+
+        vm.snapError?.let { StatusLine(ok = false, text = it) }
+
+        if (vm.snapNotes.isNotBlank()) {
+            Row(verticalAlignment = Alignment.Top) {
+                Icon(Icons.Rounded.AutoAwesome, null, tint = TextDim, modifier = Modifier.size(16.dp).padding(top = 2.dp))
+                Spacer(Modifier.width(Space.s))
+                DimText(vm.snapNotes)
+            }
+        }
+
         if (items.isNotEmpty()) {
             items.forEachIndexed { i, item -> SnapItemCard(item) { vm.updateSnapItem(i, it) } }
 
             val chosen = items.filter { it.selected }
             SectionCard {
-                Row {
-                    Text("Total", fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-                    Text("${chosen.sumOf { it.kcal }} kcal", fontWeight = FontWeight.Bold, color = Lime)
+                Row(verticalAlignment = Alignment.Bottom) {
+                    Text("Total", fontWeight = FontWeight.SemiBold, fontSize = 16.sp, modifier = Modifier.weight(1f))
+                    Text("${chosen.sumOf { it.kcal }.grouped()} kcal", fontWeight = FontWeight.SemiBold, fontSize = 20.sp)
                 }
                 DimText(
-                    "P ${fmtG(chosen.sumOf { it.protein })} g · C ${fmtG(chosen.sumOf { it.carbs })} g · F ${fmtG(chosen.sumOf { it.fat })} g"
+                    "P ${fmtG(chosen.sumOf { it.protein })} g · C ${fmtG(chosen.sumOf { it.carbs })} g · F ${fmtG(chosen.sumOf { it.fat })} g",
+                    size = 13,
                 )
-                DimText("Add to")
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    modifier = Modifier.horizontalScroll(rememberScrollState()),
-                ) {
-                    MEALS.forEach { m ->
-                        FilterChip(selected = meal == m, onClick = { meal = m }, label = { Text(m, fontSize = 12.sp) })
-                    }
-                }
-                Button(
-                    onClick = { vm.addSnapToLog(meal); onDone() },
+                MutedText("Add to")
+                ChoiceChips(MEALS.map { it to it }, meal, { meal = it })
+                val whenText = if (vm.selectedDate == LocalDate.now()) "today" else vm.selectedDate.toString()
+                PrimaryButton(
+                    "Add ${chosen.size} item${if (chosen.size == 1) "" else "s"} to $whenText",
+                    { vm.addSnapToLog(meal); onDone() },
                     enabled = chosen.isNotEmpty(),
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(14.dp),
-                ) {
-                    val whenText = if (vm.selectedDate == LocalDate.now()) "today" else vm.selectedDate.toString()
-                    Text("Add ${chosen.size} item${if (chosen.size == 1) "" else "s"} to $whenText")
-                }
+                    shape = RoundedCornerShape(Radius.inner),
+                )
             }
         }
 
-        if (bmp != null || items.isNotEmpty()) {
+        if (bmp != null || items.isNotEmpty() || vm.snapNote.isNotBlank()) {
             TextButton(onClick = { vm.clearSnap() }, modifier = Modifier.align(Alignment.CenterHorizontally)) {
-                Text("Start over")
+                Text("Start over", color = TextDim)
             }
         }
-        Spacer(Modifier.height(24.dp))
+        Spacer(Modifier.height(Space.xl))
     }
 }
 
 @Composable
 private fun SnapItemCard(item: SnapItem, onChange: (SnapItem) -> Unit) {
     var gramsText by remember(item.kcalPerG, item.proteinPerG) { mutableStateOf(item.grams.roundToInt().toString()) }
-    SectionCard {
+    SectionCard(spacing = Space.s) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Checkbox(
                 checked = item.selected,
                 onCheckedChange = { onChange(item.copy(selected = it)) },
-                colors = CheckboxDefaults.colors(checkedColor = Lime, checkmarkColor = Bg),
+                colors = CheckboxDefaults.colors(checkedColor = Lime, checkmarkColor = Ink, uncheckedColor = TextDim),
             )
-            OutlinedTextField(
+            AppTextField(
                 value = item.name,
                 onValueChange = { onChange(item.copy(name = it.take(60))) },
-                singleLine = true,
+                label = null,
                 modifier = Modifier.weight(1f),
-                shape = RoundedCornerShape(12.dp),
             )
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -236,12 +232,12 @@ private fun SnapItemCard(item: SnapItem, onChange: (SnapItem) -> Unit) {
                     if (g > 0) onChange(item.copy(grams = g))
                 },
                 label = "Grams",
-                modifier = Modifier.width(110.dp),
+                modifier = Modifier.width(112.dp),
             )
-            Spacer(Modifier.width(12.dp))
+            Spacer(Modifier.width(Space.m))
             Column(Modifier.weight(1f)) {
-                Text("${item.kcal} kcal", fontWeight = FontWeight.Bold, color = Lime, fontSize = 18.sp)
-                DimText("P ${fmtG(item.protein)} · C ${fmtG(item.carbs)} · F ${fmtG(item.fat)}")
+                Text("${item.kcal.grouped()} kcal", fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
+                DimText("P ${fmtG(item.protein)} · C ${fmtG(item.carbs)} · F ${fmtG(item.fat)}", size = 13)
             }
         }
     }

@@ -1,6 +1,8 @@
 package com.macrobro.app.ui
 
+import android.widget.Toast
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,22 +22,23 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.AutoAwesome
-import androidx.compose.material.icons.filled.CameraAlt
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowLeft
+import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
+import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.AutoAwesome
+import androidx.compose.material.icons.rounded.CameraAlt
+import androidx.compose.material.icons.rounded.ContentCopy
+import androidx.compose.material.icons.rounded.MoreVert
+import androidx.compose.material.icons.rounded.QrCodeScanner
+import androidx.compose.material.icons.rounded.Remove
+import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material.icons.rounded.WaterDrop
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.AssistChip
-import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -47,7 +50,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -57,6 +60,7 @@ import com.macrobro.app.data.FoodDraft
 import com.macrobro.app.data.FoodEntry
 import com.macrobro.app.data.MEALS
 import com.macrobro.app.data.fmtG
+import com.macrobro.app.data.fmtL
 import com.macrobro.app.data.totalsOf
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
@@ -64,117 +68,119 @@ import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
+fun Int.grouped(): String = String.format(Locale.US, "%,d", this)
+
 @Composable
 fun TodayScreen(vm: AppViewModel, onSnap: () -> Unit) {
+    var addMeal by rememberSaveable { mutableStateOf<String?>(null) }
+    var scanOnOpen by rememberSaveable { mutableStateOf(false) }
+    var editing by remember { mutableStateOf<FoodEntry?>(null) }
+
+    val openMeal = addMeal
+    if (openMeal != null) {
+        AddFoodScreen(
+            vm = vm,
+            initialMeal = openMeal,
+            startScan = scanOnOpen,
+            onClose = { addMeal = null; scanOnOpen = false },
+        )
+        return
+    }
+
+    val context = LocalContext.current
     val s = vm.settings
     val date = vm.selectedDate
     val dayEntries = vm.entriesFor(date)
     val t = totalsOf(dayEntries)
-    var addMeal by rememberSaveable { mutableStateOf<String?>(null) }
+    val isToday = date == LocalDate.now()
 
-    val openMeal = addMeal
-    if (openMeal != null) {
-        AddFoodScreen(vm, openMeal, onClose = { addMeal = null })
-    } else LazyColumn(
+    LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        contentPadding = PaddingValues(Space.l),
+        verticalArrangement = Arrangement.spacedBy(Space.m),
     ) {
         item {
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                IconButton(onClick = { vm.selectedDate = date.minusDays(1) }) {
-                    Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, "Previous day")
+                ScreenTitle(
+                    dayTitle(date),
+                    sub = date.format(DateTimeFormatter.ofPattern("EEEE, d MMMM", Locale.ENGLISH)),
+                    modifier = Modifier.weight(1f),
+                )
+                if (!isToday) {
+                    TextButton(onClick = { vm.selectedDate = LocalDate.now() }) { Text("Today", color = Lime) }
                 }
-                Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(dayTitle(date), fontWeight = FontWeight.Bold, fontSize = 22.sp)
-                    DimText(date.format(DateTimeFormatter.ofPattern("EEEE, d MMM", Locale.ENGLISH)))
-                }
-                IconButton(
-                    onClick = { vm.selectedDate = date.plusDays(1) },
-                    enabled = date.isBefore(LocalDate.now()),
-                ) {
-                    Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, "Next day")
-                }
-            }
-        }
-
-        item {
-            SectionCard {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    val over = t.kcal > s.goalKcal
-                    Box(Modifier.size(140.dp), contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator(
-                            progress = { if (s.goalKcal <= 0) 0f else (t.kcal.toFloat() / s.goalKcal).coerceIn(0f, 1f) },
-                            modifier = Modifier.fillMaxSize(),
-                            color = if (over) Orange else Lime,
-                            strokeWidth = 12.dp,
-                            trackColor = CardBg2,
-                            strokeCap = StrokeCap.Round,
-                        )
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text(
-                                abs(s.goalKcal - t.kcal).toString(),
-                                fontSize = 30.sp,
-                                fontWeight = FontWeight.Black,
-                            )
-                            DimText(if (over) "kcal over" else "kcal left")
-                        }
+                Row(Modifier.tile(RoundedCornerShape(Radius.page))) {
+                    IconButton(onClick = { vm.selectedDate = date.minusDays(1) }) {
+                        Icon(Icons.AutoMirrored.Rounded.KeyboardArrowLeft, "Previous day")
                     }
-                    Spacer(Modifier.width(16.dp))
-                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("${t.kcal} / ${s.goalKcal} kcal", fontWeight = FontWeight.SemiBold)
-                        MacroBar("Protein", t.protein, s.goalProtein, Sky)
-                        MacroBar("Carbs", t.carbs, s.goalCarbs, Orange)
-                        MacroBar("Fat", t.fat, s.goalFat, Pink)
+                    IconButton(onClick = { vm.selectedDate = date.plusDays(1) }, enabled = !isToday) {
+                        Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, "Next day")
                     }
                 }
             }
         }
 
+        item { SummaryCard(t.kcal, t.protein, t.carbs, t.fat, s.goalKcal, s.goalProtein, s.goalCarbs, s.goalFat) }
+
         item {
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                OutlinedButton(
-                    onClick = { addMeal = vm.defaultMeal() },
-                    modifier = Modifier.weight(1f).height(52.dp),
-                    shape = RoundedCornerShape(16.dp),
+            Row(horizontalArrangement = Arrangement.spacedBy(Space.s), verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(52.dp)
+                        .tile(RoundedCornerShape(Radius.page))
+                        .clickable { scanOnOpen = false; addMeal = vm.defaultMeal() }
+                        .padding(start = Space.l),
                 ) {
-                    Icon(Icons.Filled.Search, null)
-                    Spacer(Modifier.width(8.dp))
-                    Text("Find food")
+                    Icon(Icons.Rounded.Search, null, tint = TextDim, modifier = Modifier.size(20.dp))
+                    Spacer(Modifier.width(Space.s))
+                    Text("Search foods", color = TextDim, fontSize = 16.sp, modifier = Modifier.weight(1f))
+                    IconButton(onClick = { scanOnOpen = true; addMeal = vm.defaultMeal() }) {
+                        Icon(Icons.Rounded.QrCodeScanner, "Scan a barcode", tint = TextMain)
+                    }
                 }
-                Button(
-                    onClick = onSnap,
-                    modifier = Modifier.weight(1f).height(52.dp),
-                    shape = RoundedCornerShape(16.dp),
-                ) {
-                    Icon(Icons.Filled.CameraAlt, null)
-                    Spacer(Modifier.width(8.dp))
-                    Text("Snap food", fontWeight = FontWeight.Bold)
-                }
+                Box(
+                    Modifier
+                        .size(52.dp)
+                        .clip(RoundedCornerShape(Radius.page))
+                        .background(Lime)
+                        .clickable(onClick = onSnap),
+                    contentAlignment = Alignment.Center,
+                ) { Icon(Icons.Rounded.CameraAlt, "Snap food with AI", tint = Ink) }
             }
         }
+
+        item { WaterCard(ml = vm.waterFor(date), goalMl = s.waterGoalMl, onChange = { vm.addWater(date, it) }) }
 
         MEALS.forEach { meal ->
             val list = dayEntries.filter { it.meal == meal }
-            item(key = "header_$meal") {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
-                ) {
-                    Text(meal, fontWeight = FontWeight.Bold, fontSize = 18.sp, modifier = Modifier.weight(1f))
-                    DimText("${list.sumOf { it.kcal }} kcal")
-                    IconButton(onClick = { addMeal = meal }) { Icon(Icons.Filled.Add, "Add to $meal", tint = Lime) }
-                }
+            item(key = "meal_$meal") {
+                MealCard(
+                    meal = meal,
+                    entries = list,
+                    onAdd = { scanOnOpen = false; addMeal = meal },
+                    onEdit = { editing = it },
+                    onCopy = {
+                        val n = vm.copyMealFromPreviousDay(meal)
+                        val msg = if (n == 0) "Nothing in $meal the day before." else "Copied $n food${if (n == 1) "" else "s"}."
+                        Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                    },
+                )
             }
-            if (list.isEmpty()) {
-                item(key = "empty_$meal") { DimText("Nothing yet", Modifier.padding(start = 4.dp)) }
-            }
-            items(list, key = { it.id }) { e -> EntryRow(e, onDelete = { vm.deleteEntry(e.id) }) }
         }
 
-        item { Spacer(Modifier.height(24.dp)) }
+        item { Spacer(Modifier.height(Space.xl)) }
     }
 
+    editing?.let { e ->
+        EditEntryDialog(
+            entry = e,
+            onDismiss = { editing = null },
+            onSave = { vm.updateEntry(it); editing = null },
+            onDelete = { vm.deleteEntry(e.id); editing = null },
+        )
+    }
 }
 
 private fun dayTitle(date: LocalDate): String {
@@ -187,34 +193,222 @@ private fun dayTitle(date: LocalDate): String {
 }
 
 @Composable
-private fun EntryRow(e: FoodEntry, onDelete: () -> Unit) {
+private fun SummaryCard(
+    kcal: Int, protein: Double, carbs: Double, fat: Double,
+    goalKcal: Int, goalP: Int, goalC: Int, goalF: Int,
+) {
+    val over = kcal > goalKcal
+    SectionCard {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Ring(
+                progress = if (goalKcal <= 0) 0f else kcal.toFloat() / goalKcal,
+                color = if (over) Serious else Lime,
+                modifier = Modifier.size(136.dp),
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(abs(goalKcal - kcal).grouped(), fontSize = 32.sp, fontWeight = FontWeight.SemiBold, lineHeight = 34.sp)
+                    Text(if (over) "kcal over" else "kcal left", color = TextDim, fontSize = 13.sp)
+                }
+            }
+            Spacer(Modifier.width(Space.l))
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Space.m)) {
+                Text(
+                    "${kcal.grouped()} of ${goalKcal.grouped()} kcal",
+                    fontSize = 14.sp, color = TextDim,
+                )
+                MacroMeter("Protein", Protein, protein, goalP)
+                MacroMeter("Carbs", Carbs, carbs, goalC)
+                MacroMeter("Fat", Fat, fat, goalF)
+            }
+        }
+    }
+}
+
+@Composable
+private fun WaterCard(ml: Int, goalMl: Int, onChange: (Int) -> Unit) {
+    val glass = 250
+    val cells = (goalMl / glass).coerceIn(4, 16)
+    val filled = ml / glass
+    SectionCard(spacing = Space.s) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Rounded.WaterDrop, null, tint = Water, modifier = Modifier.size(20.dp))
+            Spacer(Modifier.width(Space.s))
+            Column(Modifier.weight(1f)) {
+                Text("Water", fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
+                Text("${fmtL(ml)} of ${fmtL(goalMl)} L", color = TextDim, fontSize = 13.sp)
+            }
+            IconButton(onClick = { onChange(-glass) }, enabled = ml > 0) {
+                Icon(Icons.Rounded.Remove, "Remove a glass")
+            }
+            Box(
+                Modifier
+                    .clip(RoundedCornerShape(Radius.inner))
+                    .background(Surface3)
+                    .clickable { onChange(glass) }
+                    .padding(horizontal = Space.m, vertical = Space.s),
+            ) { Text("+ 250 ml", fontWeight = FontWeight.SemiBold, fontSize = 14.sp) }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+            repeat(cells) { i ->
+                Box(
+                    Modifier
+                        .weight(1f)
+                        .height(8.dp)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(if (i < filled) Water else Water.copy(alpha = 0.18f))
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun MealCard(
+    meal: String,
+    entries: List<FoodEntry>,
+    onAdd: () -> Unit,
+    onEdit: (FoodEntry) -> Unit,
+    onCopy: () -> Unit,
+) {
+    var menu by remember { mutableStateOf(false) }
+    SectionCard(padding = Space.l, spacing = 0.dp) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(meal, fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
+                Text(
+                    if (entries.isEmpty()) "Nothing yet" else "${entries.sumOf { it.kcal }.grouped()} kcal",
+                    color = TextDim, fontSize = 13.sp,
+                )
+            }
+            Box {
+                IconButton(onClick = { menu = true }) { Icon(Icons.Rounded.MoreVert, "More for $meal", tint = TextDim) }
+                DropdownMenu(expanded = menu, onDismissRequest = { menu = false }, containerColor = Surface2) {
+                    DropdownMenuItem(
+                        text = { Text("Copy from previous day") },
+                        leadingIcon = { Icon(Icons.Rounded.ContentCopy, null) },
+                        onClick = { menu = false; onCopy() },
+                    )
+                }
+            }
+            Box(
+                Modifier
+                    .size(40.dp)
+                    .clip(RoundedCornerShape(Radius.inner))
+                    .background(Lime)
+                    .clickable(onClick = onAdd),
+                contentAlignment = Alignment.Center,
+            ) { Icon(Icons.Rounded.Add, "Add to $meal", tint = Ink) }
+        }
+        entries.forEachIndexed { i, e ->
+            if (i == 0) Spacer(Modifier.height(Space.s)) else HorizontalDivider(color = Hairline)
+            EntryRow(e) { onEdit(e) }
+        }
+    }
+}
+
+@Composable
+private fun EntryRow(e: FoodEntry, onClick: () -> Unit) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
-            .background(CardBg)
-            .padding(start = 14.dp, top = 10.dp, bottom = 10.dp, end = 4.dp),
+            .clip(RoundedCornerShape(Radius.inner))
+            .clickable(onClick = onClick)
+            .padding(vertical = Space.m),
     ) {
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (e.source == "snap") {
-                    Icon(Icons.Filled.AutoAwesome, "From photo", tint = Lime, modifier = Modifier.size(14.dp))
-                    Spacer(Modifier.width(4.dp))
+                    Icon(Icons.Rounded.AutoAwesome, "Logged with AI", tint = TextDim, modifier = Modifier.size(14.dp))
+                    Spacer(Modifier.width(Space.xs))
                 }
-                Text(e.name, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(e.name, fontWeight = FontWeight.Medium, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
-            DimText(
+            Text(
                 (if (e.grams > 0) "${e.grams} g · " else "") +
-                    "P ${fmtG(e.protein)} · C ${fmtG(e.carbs)} · F ${fmtG(e.fat)}"
+                    "P ${fmtG(e.protein)} · C ${fmtG(e.carbs)} · F ${fmtG(e.fat)}",
+                color = TextDim, fontSize = 13.sp,
             )
         }
-        Text("${e.kcal}", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-        DimText(" kcal")
-        IconButton(onClick = onDelete) { Icon(Icons.Filled.Close, "Delete", tint = TextDim) }
+        Spacer(Modifier.width(Space.s))
+        Text(e.kcal.grouped(), fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
+        Text(" kcal", color = TextMuted, fontSize = 13.sp)
     }
 }
 
+@Composable
+private fun MealPicker(selected: String, onSelect: (String) -> Unit) {
+    ChoiceChips(MEALS.map { it to it }, selected, onSelect)
+}
+
+@Composable
+private fun EditEntryDialog(
+    entry: FoodEntry,
+    onDismiss: () -> Unit,
+    onSave: (FoodEntry) -> Unit,
+    onDelete: () -> Unit,
+) {
+    var name by remember { mutableStateOf(entry.name) }
+    var meal by remember { mutableStateOf(entry.meal) }
+    var grams by remember { mutableStateOf(if (entry.grams > 0) entry.grams.toString() else "") }
+    var kcal by remember { mutableStateOf(entry.kcal.toString()) }
+    var protein by remember { mutableStateOf(fmtG(entry.protein)) }
+    var carbs by remember { mutableStateOf(fmtG(entry.carbs)) }
+    var fat by remember { mutableStateOf(fmtG(entry.fat)) }
+    val byWeight = entry.grams > 0
+
+    // With a weight, editing grams rescales everything; without one, edit the numbers directly.
+    val g = grams.toDoubleSafe()
+    val factor = if (byWeight && entry.grams > 0) g / entry.grams else 1.0
+    val preview = if (byWeight) entry.copy(
+        grams = g.roundToInt(),
+        kcal = (entry.kcal * factor).roundToInt(),
+        protein = entry.protein * factor,
+        carbs = entry.carbs * factor,
+        fat = entry.fat * factor,
+    ) else entry.copy(
+        kcal = kcal.toIntSafe(),
+        protein = protein.toDoubleSafe(),
+        carbs = carbs.toDoubleSafe(),
+        fat = fat.toDoubleSafe(),
+    )
+    val valid = name.isNotBlank() && (if (byWeight) g > 0 else preview.kcal >= 0)
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = Surface2,
+        title = { Text("Edit food") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(Space.m), modifier = Modifier.verticalScroll(rememberScrollState())) {
+                AppTextField(name, { name = it.take(60) }, "Name", Modifier.fillMaxWidth())
+                if (byWeight) {
+                    NumberField(grams, { grams = it }, "Amount (g)", Modifier.fillMaxWidth())
+                    Text(
+                        "${preview.kcal.grouped()} kcal · P ${fmtG(preview.protein)} · C ${fmtG(preview.carbs)} · F ${fmtG(preview.fat)}",
+                        color = TextDim, fontSize = 14.sp,
+                    )
+                } else {
+                    NumberField(kcal, { kcal = it }, "kcal", Modifier.fillMaxWidth())
+                    Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
+                        NumberField(protein, { protein = it }, "Protein", Modifier.weight(1f), decimal = true)
+                        NumberField(carbs, { carbs = it }, "Carbs", Modifier.weight(1f), decimal = true)
+                        NumberField(fat, { fat = it }, "Fat", Modifier.weight(1f), decimal = true)
+                    }
+                }
+                MealPicker(meal) { meal = it }
+                TextButton(onClick = onDelete) { Text("Delete from log", color = ErrorRed) }
+            }
+        },
+        confirmButton = {
+            TextButton(enabled = valid, onClick = { onSave(preview.copy(name = name.trim(), meal = meal)) }) {
+                Text("Save", color = if (valid) Lime else TextMuted, fontWeight = FontWeight.SemiBold)
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel", color = TextDim) } },
+    )
+}
+
+/** Quick add: a one-off food with just numbers, no weight needed. */
 @Composable
 internal fun AddFoodDialog(
     meal: String,
@@ -237,57 +431,46 @@ internal fun AddFoodDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        containerColor = CardBg,
-        title = { Text("Add to $meal") },
+        containerColor = Surface2,
+        title = { Text("Quick add to $meal") },
         text = {
             Column(
-                verticalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(Space.s),
                 modifier = Modifier.verticalScroll(rememberScrollState()),
             ) {
                 if (recent.isNotEmpty()) {
-                    DimText("Recent")
-                    LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    MutedText("Recent")
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
                         items(recent, key = { it.id }) { r ->
-                            AssistChip(
-                                onClick = {
-                                    name = r.name
-                                    grams = if (r.grams > 0) r.grams.toString() else ""
-                                    kcal = r.kcal.toString()
-                                    protein = fmtG(r.protein)
-                                    carbs = fmtG(r.carbs)
-                                    fat = fmtG(r.fat)
-                                },
-                                label = { Text(r.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                            )
+                            AppChip(r.name, false, {
+                                name = r.name
+                                grams = if (r.grams > 0) r.grams.toString() else ""
+                                kcal = r.kcal.toString()
+                                protein = fmtG(r.protein)
+                                carbs = fmtG(r.carbs)
+                                fat = fmtG(r.fat)
+                            })
                         }
                     }
                 }
-                OutlinedTextField(
-                    value = name,
-                    onValueChange = { name = it.take(60) },
-                    label = { Text("Food name") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp),
-                )
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                AppTextField(name, { name = it.take(60) }, "Food name", Modifier.fillMaxWidth())
+                Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
                     NumberField(grams, { grams = it }, "Grams", Modifier.weight(1f))
                     NumberField(kcal, { kcal = it }, "kcal", Modifier.weight(1f))
                 }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
                     NumberField(protein, { protein = it }, "Protein", Modifier.weight(1f), decimal = true)
                     NumberField(carbs, { carbs = it }, "Carbs", Modifier.weight(1f), decimal = true)
                     NumberField(fat, { fat = it }, "Fat", Modifier.weight(1f), decimal = true)
                 }
-                if (kcal.isBlank() && kcalValue > 0) DimText("≈ $kcalValue kcal from macros")
+                if (kcal.isBlank() && kcalValue > 0) MutedText("About $kcalValue kcal from the macros")
             }
         },
         confirmButton = {
-            Button(
-                enabled = valid,
-                onClick = { onAdd(FoodDraft(name.trim(), grams.toIntSafe(), kcalValue, p, c, f)) },
-            ) { Text("Add") }
+            TextButton(enabled = valid, onClick = { onAdd(FoodDraft(name.trim(), grams.toIntSafe(), kcalValue, p, c, f)) }) {
+                Text("Add", color = if (valid) Lime else TextMuted, fontWeight = FontWeight.SemiBold)
+            }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel", color = TextDim) } },
     )
 }

@@ -10,16 +10,21 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.macrobro.app.ai.Gemini
 import com.macrobro.app.ai.Prompts
+import com.macrobro.app.data.AppData
+import com.macrobro.app.data.BarcodeResult
 import com.macrobro.app.data.ChatMsg
+import com.macrobro.app.data.DayStat
 import com.macrobro.app.data.FoodDraft
 import com.macrobro.app.data.FoodEntry
 import com.macrobro.app.data.FoodLibrary
 import com.macrobro.app.data.LibFood
 import com.macrobro.app.data.MY_FOODS
+import com.macrobro.app.data.OpenFoodFacts
 import com.macrobro.app.data.RECENT
 import com.macrobro.app.data.Settings
 import com.macrobro.app.data.SnapItem
 import com.macrobro.app.data.Store
+import com.macrobro.app.data.WeightEntry
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -36,29 +41,27 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private val saveMutex = Mutex()
     private var idSeq = 0L
 
+    private val initial = store.load()
+
     var settings by mutableStateOf(store.loadSettings())
         private set
-    var entries by mutableStateOf(store.loadEntries())
+    var entries by mutableStateOf(initial.entries)
         private set
-    var chat by mutableStateOf(store.loadChat())
+    var chat by mutableStateOf(initial.chat)
+        private set
+    var customFoods by mutableStateOf(initial.customFoods)
+        private set
+    var weights by mutableStateOf(initial.weights.sortedBy { it.date })
+        private set
+    var water by mutableStateOf(initial.water)
         private set
     var selectedDate by mutableStateOf(LocalDate.now())
 
-    // Food library: bundled USDA foods + the user's own foods
+    /** Bundled USDA foods, loaded in the background at start. */
     var libraryFoods by mutableStateOf<List<LibFood>>(emptyList())
         private set
-    var customFoods by mutableStateOf(store.loadCustomFoods())
-        private set
 
-    init {
-        viewModelScope.launch {
-            libraryFoods = withContext(Dispatchers.IO) {
-                try { FoodLibrary.loadAssets(getApplication()) } catch (e: Exception) { emptyList() }
-            }
-        }
-    }
-
-    // Snap Food AI state
+    // Snap / describe AI
     var snapBitmap by mutableStateOf<Bitmap?>(null)
         private set
     var snapItems by mutableStateOf<List<SnapItem>>(emptyList())
@@ -70,14 +73,33 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         private set
     var snapError by mutableStateOf<String?>(null)
 
-    // Gym Bro state
+    // Gym Bro
     var broLoading by mutableStateOf(false)
         private set
     var broError by mutableStateOf<String?>(null)
 
+    init {
+        viewModelScope.launch {
+            libraryFoods = withContext(Dispatchers.IO) {
+                try { FoodLibrary.loadAssets(getApplication()) } catch (e: Exception) { emptyList() }
+            }
+        }
+    }
+
     val hasKey: Boolean get() = settings.apiKey.isNotBlank()
 
     private fun newId(): Long = System.currentTimeMillis() * 100 + (idSeq++ % 100)
+
+    private fun persist() {
+        val snapshot = AppData(entries, chat, customFoods, weights, water)
+        viewModelScope.launch(Dispatchers.IO) {
+            saveMutex.withLock {
+                try { store.save(snapshot) } catch (_: Exception) { }
+            }
+        }
+    }
+
+    // ---------- Food log ----------
 
     fun entriesFor(date: LocalDate): List<FoodEntry> = entries.filter { it.date == date.toString() }
 
@@ -90,20 +112,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         LibFood(
             name = e.name, display = e.name, category = RECENT,
             kcal = e.kcal * k, protein = e.protein * k, carbs = e.carbs * k, fat = e.fat * k,
-            portionLabel = "last time", portionG = e.grams.toDouble(),
+            portionLabel = "Last time", portionG = e.grams.toDouble(), source = "recent",
         )
-    }
-
-    fun addCustomFood(food: LibFood): LibFood {
-        val saved = food.copy(id = newId(), custom = true, category = MY_FOODS, display = food.name)
-        customFoods = customFoods + saved
-        persistData()
-        return saved
-    }
-
-    fun deleteCustomFood(id: Long) {
-        customFoods = customFoods.filterNot { it.id == id }
-        persistData()
     }
 
     fun defaultMeal(): String {
@@ -122,31 +132,152 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         entries = entries + drafts.map {
             FoodEntry(newId(), date, meal, it.name, it.grams, it.kcal, it.protein, it.carbs, it.fat, source)
         }
-        persistData()
+        persist()
+    }
+
+    fun updateEntry(updated: FoodEntry) {
+        entries = entries.map { if (it.id == updated.id) updated else it }
+        persist()
     }
 
     fun deleteEntry(id: Long) {
         entries = entries.filterNot { it.id == id }
-        persistData()
+        persist()
     }
+
+    /** Copies one meal from the previous day into the selected day. Returns how many foods were copied. */
+    fun copyMealFromPreviousDay(meal: String): Int {
+        val from = entriesFor(selectedDate.minusDays(1)).filter { it.meal == meal }
+        if (from.isEmpty()) return 0
+        val date = selectedDate.toString()
+        entries = entries + from.map { it.copy(id = newId(), date = date) }
+        persist()
+        return from.size
+    }
+
+    // ---------- Own foods & barcodes ----------
+
+    fun addCustomFood(food: LibFood): LibFood {
+        val saved = food.copy(
+            id = newId(), custom = true, category = MY_FOODS, source = "custom",
+            display = food.display.ifBlank { food.name },
+            name = if (food.source == "off") food.name else food.display.ifBlank { food.name },
+        )
+        customFoods = customFoods.filterNot { saved.barcode.isNotBlank() && it.barcode == saved.barcode } + saved
+        persist()
+        return saved
+    }
+
+    fun deleteCustomFood(id: Long) {
+        customFoods = customFoods.filterNot { it.id == id }
+        persist()
+    }
+
+    /** Checks your own foods first (works offline), then Open Food Facts. */
+    suspend fun lookupBarcode(code: String): BarcodeResult {
+        val digits = code.filter { it.isDigit() }
+        customFoods.firstOrNull { it.barcode.isNotBlank() && it.barcode == digits }?.let { return BarcodeResult.Found(it) }
+        val result = OpenFoodFacts.lookup(digits)
+        if (result is BarcodeResult.Found) {
+            // Keep scanned products in My foods so the next scan works offline.
+            return BarcodeResult.Found(addCustomFood(result.food))
+        }
+        return result
+    }
+
+    suspend fun searchOnline(query: String): List<LibFood> = OpenFoodFacts.search(query)
+
+    // ---------- Water ----------
+
+    fun waterFor(date: LocalDate): Int = water[date.toString()] ?: 0
+
+    fun addWater(date: LocalDate, deltaMl: Int) {
+        val key = date.toString()
+        val next = ((water[key] ?: 0) + deltaMl).coerceIn(0, 10_000)
+        water = water + (key to next)
+        persist()
+    }
+
+    // ---------- Weight ----------
+
+    fun logWeight(date: LocalDate, kg: Double) {
+        if (kg <= 0) return
+        val key = date.toString()
+        weights = (weights.filterNot { it.date == key } + WeightEntry(key, kg)).sortedBy { it.date }
+        persist()
+        // The newest weigh-in becomes the profile weight (used for targets and Gym Bro).
+        if (weights.lastOrNull()?.date == key) updateSettings(settings.copy(weightKg = kg))
+    }
+
+    fun deleteWeight(date: String) {
+        weights = weights.filterNot { it.date == date }
+        persist()
+    }
+
+    // ---------- Stats ----------
+
+    fun dayStats(days: Int, end: LocalDate = LocalDate.now()): List<DayStat> {
+        val byDate = entries.groupBy { it.date }
+        return (days - 1 downTo 0).map { back ->
+            val d = end.minusDays(back.toLong())
+            val list = byDate[d.toString()].orEmpty()
+            DayStat(
+                date = d,
+                kcal = list.sumOf { it.kcal },
+                protein = list.sumOf { it.protein },
+                carbs = list.sumOf { it.carbs },
+                fat = list.sumOf { it.fat },
+                count = list.size,
+            )
+        }
+    }
+
+    /** Days in a row with something logged. Today counts once you log; until then the streak runs to yesterday. */
+    fun streak(): Int {
+        val logged = entries.mapTo(HashSet()) { it.date }
+        var d = LocalDate.now()
+        if (d.toString() !in logged) d = d.minusDays(1)
+        var n = 0
+        while (d.toString() in logged) {
+            n++
+            d = d.minusDays(1)
+        }
+        return n
+    }
+
+    // ---------- Settings & data ----------
 
     fun updateSettings(s: Settings) {
         settings = s
         viewModelScope.launch(Dispatchers.IO) { store.saveSettings(s) }
     }
 
-    private fun persistData() {
-        val e = entries
-        val c = chat
-        val f = customFoods
-        viewModelScope.launch(Dispatchers.IO) {
-            saveMutex.withLock {
-                try { store.saveData(e, c, f) } catch (_: Exception) { }
-            }
-        }
+    fun exportBackup(): String = Store.backupJson(AppData(entries, chat, customFoods, weights, water), settings)
+
+    /** Parses without applying, so the UI can confirm first. Throws with a readable message. */
+    fun parseBackup(text: String): Pair<AppData, Settings> = Store.parseBackup(text, settings)
+
+    fun applyBackup(data: AppData, s: Settings) {
+        entries = data.entries
+        chat = data.chat
+        customFoods = data.customFoods
+        weights = data.weights.sortedBy { it.date }
+        water = data.water
+        persist()
+        updateSettings(s)
     }
 
-    // ---------- Snap Food AI ----------
+    fun deleteAllData() {
+        entries = emptyList()
+        chat = emptyList()
+        customFoods = emptyList()
+        weights = emptyList()
+        water = emptyMap()
+        clearSnap()
+        persist()
+    }
+
+    // ---------- Snap / describe AI ----------
 
     fun loadSnapImage(uri: Uri) {
         viewModelScope.launch {
@@ -164,6 +295,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun removeSnapPhoto() {
+        snapBitmap = null
+    }
+
     fun clearSnap() {
         snapBitmap = null
         snapItems = emptyList()
@@ -176,23 +311,30 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         snapItems = snapItems.toMutableList().also { if (index in it.indices) it[index] = item }
     }
 
+    /** Works with a photo, a typed description, or both. */
     fun analyzeSnap() {
-        val bmp = snapBitmap ?: return
+        val bmp = snapBitmap
+        val note = snapNote.trim()
+        if (bmp == null && note.isEmpty()) { snapError = "Take a photo or describe what you ate."; return }
         if (!hasKey) { snapError = "Add your Gemini API key in Settings first."; return }
         if (snapLoading) return
         snapLoading = true
         snapError = null
         val s = settings
-        val note = snapNote
         viewModelScope.launch {
             try {
-                val b64 = withContext(Dispatchers.Default) { ImageUtil.toJpegBase64(bmp) }
-                val contents = JSONArray().put(Gemini.userTextAndImage(Prompts.snapUserText(note), b64))
-                val text = Gemini.generate(s.apiKey, s.model, Prompts.SNAP_SYSTEM, contents, jsonOutput = true, temperature = 0.2)
-                val (items, notes) = parseSnap(text)
+                val text = Prompts.snapUserText(note, hasPhoto = bmp != null)
+                val message = if (bmp != null) {
+                    val b64 = withContext(Dispatchers.Default) { ImageUtil.toJpegBase64(bmp) }
+                    Gemini.userTextAndImage(text, b64)
+                } else Gemini.userText(text)
+                val reply = Gemini.generate(
+                    s.apiKey, s.model, Prompts.SNAP_SYSTEM, JSONArray().put(message),
+                    jsonOutput = true, temperature = 0.2,
+                )
+                val (items, notes) = parseSnap(reply)
                 snapItems = items
-                snapNotes = notes
-                if (items.isEmpty() && notes.isBlank()) snapNotes = "No food found in this photo."
+                snapNotes = notes.ifBlank { if (items.isEmpty()) "I couldn't find any food here." else "" }
             } catch (e: Exception) {
                 snapError = e.message ?: "Something went wrong."
             } finally {
@@ -238,18 +380,18 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         if (msg.isEmpty() || broLoading) return
         if (!hasKey) { broError = "Add your Gemini API key in Settings first."; return }
         chat = chat + ChatMsg("user", msg)
-        persistData()
+        persist()
         broLoading = true
         broError = null
         val s = settings
         val today = LocalDate.now()
-        val system = Prompts.broSystem(s, entriesFor(today), today)
+        val system = Prompts.broSystem(s, entriesFor(today), today, dayStats(7, today), weights, waterFor(today))
         val history = chat.takeLast(24)
         viewModelScope.launch {
             try {
                 val reply = Gemini.generate(s.apiKey, s.model, system, toContents(history), temperature = 0.9)
                 chat = chat + ChatMsg("model", reply)
-                persistData()
+                persist()
             } catch (e: Exception) {
                 broError = e.message ?: "Something went wrong."
             } finally {
@@ -261,7 +403,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun clearChat() {
         chat = emptyList()
         broError = null
-        persistData()
+        persist()
     }
 
     /** Gemini wants user/model turns; merge repeats and start with a user turn. */
@@ -281,11 +423,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         return arr
     }
 
-    /** Sends a tiny request to check the key + model. Returns a human-readable result. */
-    suspend fun testConnection(apiKey: String, model: String): String = try {
+    /** Sends a tiny request to check the key and model. Returns (ok, message). */
+    suspend fun testConnection(apiKey: String, model: String): Pair<Boolean, String> = try {
         Gemini.generate(apiKey, model, null, JSONArray().put(Gemini.userText("Reply with just: OK")), temperature = 0.0)
-        "✅ Key works. Gemini is connected."
+        true to "Key works. Gemini is connected."
     } catch (e: Exception) {
-        "❌ " + (e.message ?: "Couldn't connect.")
+        false to (e.message ?: "Couldn't connect.")
     }
 }

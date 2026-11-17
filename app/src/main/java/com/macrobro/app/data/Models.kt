@@ -1,6 +1,7 @@
 package com.macrobro.app.data
 
 import org.json.JSONObject
+import java.time.LocalDate
 import java.util.Locale
 import kotlin.math.roundToInt
 
@@ -73,6 +74,34 @@ data class Settings(
     val weightKg: Double = 80.0,
     val activity: Double = 1.55,
     val goalType: String = "maintain", // cut / maintain / bulk
+    val waterGoalMl: Int = 2500,
+)
+
+data class WeightEntry(val date: String, val kg: Double) {
+    fun toJson(): JSONObject = JSONObject().put("date", date).put("kg", kg)
+
+    companion object {
+        fun fromJson(o: JSONObject) = WeightEntry(o.optString("date"), o.optDouble("kg", 0.0))
+    }
+}
+
+/** Everything the app stores (except settings). Also the backup file format. */
+data class AppData(
+    val entries: List<FoodEntry> = emptyList(),
+    val chat: List<ChatMsg> = emptyList(),
+    val customFoods: List<LibFood> = emptyList(),
+    val weights: List<WeightEntry> = emptyList(),
+    val water: Map<String, Int> = emptyMap(), // date -> ml
+)
+
+/** One day's totals, for charts and Gym Bro's weekly context. */
+data class DayStat(
+    val date: LocalDate,
+    val kcal: Int,
+    val protein: Double,
+    val carbs: Double,
+    val fat: Double,
+    val count: Int,
 )
 
 data class Totals(val kcal: Int, val protein: Double, val carbs: Double, val fat: Double)
@@ -106,6 +135,12 @@ data class SnapItem(
 fun fmtG(v: Double): String =
     if (v < 10 && v != v.roundToInt().toDouble()) String.format(Locale.US, "%.1f", v)
     else v.roundToInt().toString()
+
+/** Body weight with one decimal: 78.4, 80. */
+fun fmtKg(v: Double): String = String.format(Locale.US, "%.1f", v).removeSuffix(".0")
+
+/** Litres from millilitres: 1.25, 2.5, 3. */
+fun fmtL(ml: Int): String = String.format(Locale.US, "%.2f", ml / 1000.0).trimEnd('0').trimEnd('.')
 
 /** Mifflin–St Jeor estimate with sensible floors. Returns (kcal, protein, carbs, fat). */
 fun calculateGoals(s: Settings): IntArray {

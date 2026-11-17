@@ -20,6 +20,8 @@ data class LibFood(
     val portionG: Double = 0.0,
     val custom: Boolean = false,
     val id: Long = 0,
+    val barcode: String = "",
+    val source: String = "", // "usda", "off" (Open Food Facts), "custom", "recent"
 ) {
     /** Lower-case words of display + name, padded with spaces for word-start matching. */
     val searchKey: String = " " + FoodLibrary.normalize("$display $name") + " "
@@ -37,17 +39,18 @@ data class LibFood(
     }
 
     fun toJson(): JSONObject = JSONObject()
-        .put("id", id).put("name", name).put("category", category)
+        .put("id", id).put("name", name).put("display", display).put("category", category)
         .put("kcal", kcal).put("protein", protein).put("carbs", carbs).put("fat", fat)
         .put("fiber", fiber).put("sugar", sugar)
         .put("portionLabel", portionLabel).put("portionG", portionG)
+        .put("barcode", barcode)
 
     companion object {
         fun customFromJson(o: JSONObject): LibFood {
             val n = o.optString("name", "My food")
             return LibFood(
                 name = n,
-                display = n,
+                display = o.optString("display", "").ifBlank { n },
                 category = MY_FOODS,
                 kcal = o.optDouble("kcal", 0.0),
                 protein = o.optDouble("protein", 0.0),
@@ -59,6 +62,8 @@ data class LibFood(
                 portionG = o.optDouble("portionG", 0.0),
                 custom = true,
                 id = o.optLong("id"),
+                barcode = o.optString("barcode", ""),
+                source = "custom",
             )
         }
     }
@@ -98,6 +103,7 @@ object FoodLibrary {
             popular = c[9].toIntOrNull() ?: 0,
             portionLabel = c[10],
             portionG = d(11),
+            source = "usda",
         )
     }
 
