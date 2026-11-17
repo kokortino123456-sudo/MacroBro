@@ -23,6 +23,35 @@ jobs:
         with:
           gradle-version: "8.11.1"
 
+      # Czech & Slovak supermarket products from Open Food Facts (ODbL), refreshed once a week.
+      - name: Week number
+        id: week
+        run: echo "week=$(date -u +%G-%V)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache product database
+        id: products-cache
+        uses: actions/cache@v4
+        with:
+          path: offdata/products.db
+          key: off-products-${{ steps.week.outputs.week }}
+          restore-keys: off-products-
+
+      - name: Build CZ/SK product database from Open Food Facts
+        if: steps.products-cache.outputs.cache-hit != 'true'
+        continue-on-error: true
+        timeout-minutes: 30
+        run: python3 tools/build_off_products.py offdata/products.db
+
+      - name: Bundle product database
+        run: |
+          if [ -s offdata/products.db ]; then
+            mkdir -p app/src/main/assets
+            cp offdata/products.db app/src/main/assets/products.db
+            python3 -c "import sqlite3; db=sqlite3.connect('offdata/products.db'); print('products:', db.execute('select value from meta where key=\'count\'').fetchone()[0], 'built', db.execute('select value from meta where key=\'built\'').fetchone()[0])"
+          else
+            echo "No product database available; building without offline shop products."
+          fi
+
       - name: Build APK
         run: gradle assembleRelease --no-daemon --stacktrace
 

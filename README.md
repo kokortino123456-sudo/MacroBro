@@ -12,6 +12,8 @@ A free Android calorie counter with two AI helpers. No account, no ads, no track
 
   Search works with or without accents, so "knedlik" finds *Houskový knedlík*, "zurek" finds *Żurek* and "knoedel" finds *Knödel*. Popular foods and dishes have portions like "1 medium banana" or "4 slices".
 - **Barcode scanner**: scan a packaged food and its label values come from [Open Food Facts](https://world.openfoodfacts.org), which has good Czech and EU coverage. Scanned products are saved to *My foods* so the next scan works offline. If a product is missing, add it from the label once.
+- **Czech & Slovak shop products, offline**: every build bundles the packaged products that Open Food Facts lists as sold in Czechia or Slovakia, with barcode, brand, pack size and per-100 g values. Scanning finds them without internet, and search shows them under "In Czech & Slovak shops" (or use the *CZ/SK shops* filter). A small pack, like a 150 g bag of nuts, gets a "1 pack" portion. GitHub refreshes the list once a week.
+- **Read a label with AI**: if a product is missing, tap *Create food → Photo of the nutrition label*. Gemini or OpenRouter reads the per-100 g values, pack size and serving size (Czech, Slovak, German, Polish or English labels), and you check them before saving. The barcode is saved with it, so the next scan is instant.
 - **Online search**: search Open Food Facts by name when a packaged food isn't in the library.
 - **My foods**: save your own foods from package labels, optionally with a serving size.
 - **Two AI providers**: Google Gemini (free key) or OpenRouter (one key for hundreds of models). The OpenRouter default `openrouter/free` picks a free model that can read photos. A model picker filters by free and photo support.
@@ -71,4 +73,4 @@ Carbohydrates follow each source's convention. USDA counts fiber inside carbs, s
 python3 tools/build_food_db.py tempolife-foods.csv thereforejs-foods/dist/index.mjs app/src/main/assets/foods.tsv
 ```
 
-- Packaged foods come from **Open Food Facts** (Open Database License), looked up live.
+- **Open Food Facts** (Open Database License, https://world.openfoodfacts.org): packaged foods. They are looked up live, and the Czech & Slovak subset is bundled offline. `tools/build_off_products.py` builds that subset from the public CSV export during the GitHub build. The bundled product database (`products.db` in the APK) is available under the ODbL.

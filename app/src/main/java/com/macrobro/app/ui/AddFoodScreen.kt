@@ -2,6 +2,20 @@ package com.macrobro.app.ui
 
 import androidx.compose.foundation.layout.imePadding
 import androidx.activity.compose.BackHandler
+import java.io.File
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.Dispatchers
+import com.macrobro.app.data.fmt1
+import com.macrobro.app.data.LabelValues
+import com.macrobro.app.ImageUtil
+import androidx.core.content.FileProvider
+import androidx.compose.material.icons.rounded.CameraAlt
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.compose.rememberLauncherForActivityResult
+import android.net.Uri
+import android.content.ActivityNotFoundException
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -70,6 +84,8 @@ import kotlin.math.roundToInt
 
 private data class CreateDraft(val name: String, val barcode: String, val intro: String?)
 
+private const val SHOPS = "CZ/SK shops"
+
 /** Full-screen food picker: USDA library, your own foods, recent foods, barcodes and online products. */
 @Composable
 fun AddFoodScreen(vm: AppViewModel, initialMeal: String, startScan: Boolean, onClose: () -> Unit) {
@@ -92,6 +108,20 @@ fun AddFoodScreen(vm: AppViewModel, initialMeal: String, startScan: Boolean, onC
     var onlineFor by remember { mutableStateOf("") }
     var onlineBusy by remember { mutableStateOf(false) }
     var onlineError by remember { mutableStateOf<String?>(null) }
+
+    var shopResults by remember { mutableStateOf<List<LibFood>>(emptyList()) }
+    var shopFor by remember { mutableStateOf("") }
+    LaunchedEffect(query, filter, vm.productCount) {
+        val q = query.trim()
+        if (q.length < 2 || vm.productCount == 0 || (filter != "All" && filter != SHOPS)) {
+            shopResults = emptyList()
+            shopFor = q
+            return@LaunchedEffect
+        }
+        delay(250) // wait until typing pauses
+        shopResults = vm.searchProducts(q)
+        shopFor = q
+    }
 
     BackHandler(onBack = onClose)
 
@@ -161,6 +191,7 @@ fun AddFoodScreen(vm: AppViewModel, initialMeal: String, startScan: Boolean, onC
                 filter == "All" -> custom + library
                 filter == MY_FOODS -> custom
                 filter == RECENT -> recent
+                filter == SHOPS -> emptyList()
                 filter == FoodLibrary.WORLD -> library.filter { it.isDish }
                 filter in FoodLibrary.CUISINES -> library.filter { it.isDish && it.category == filter }
                 else -> library.filter { it.category == filter && !it.isDish }
@@ -169,8 +200,9 @@ fun AddFoodScreen(vm: AppViewModel, initialMeal: String, startScan: Boolean, onC
         }
     }
     val popular = remember(library) { library.filter { it.popular > 0 }.sortedBy { it.popular } }
-    val chipOptions = remember(filter) {
-        val base = listOf("All", MY_FOODS, RECENT, FoodLibrary.WORLD, "Czech", "Polish", "German")
+    val chipOptions = remember(filter, vm.productCount) {
+        val base = listOf("All", MY_FOODS, RECENT) + (if (vm.productCount > 0) listOf(SHOPS) else emptyList()) +
+            listOf(FoodLibrary.WORLD, "Czech", "Polish", "German")
         val extra = if (filter in FoodLibrary.CUISINES && filter !in base) listOf(filter) else emptyList()
         (base + extra + FoodLibrary.CATEGORIES).map { it to it }
     }
@@ -258,9 +290,15 @@ fun AddFoodScreen(vm: AppViewModel, initialMeal: String, startScan: Boolean, onC
             verticalArrangement = Arrangement.spacedBy(Space.s),
         ) {
             item {
-                Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
-                    SecondaryButton("Quick add", { showQuickAdd = true }, Modifier.weight(1f), icon = Icons.Rounded.Bolt)
-                    SecondaryButton("Create food", { createDraft = CreateDraft(query.trim().replaceFirstChar { it.uppercase() }, "", null) }, Modifier.weight(1f), icon = Icons.Rounded.Add)
+                Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
+                    PrimaryButton(
+                        "Scan a barcode", { scan() }, Modifier.fillMaxWidth(),
+                        icon = Icons.Rounded.QrCodeScanner, loading = lookupBusy,
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
+                        SecondaryButton("Quick add", { showQuickAdd = true }, Modifier.weight(1f), icon = Icons.Rounded.Bolt)
+                        SecondaryButton("Create food", { createDraft = CreateDraft(query.trim().replaceFirstChar { it.uppercase() }, "", null) }, Modifier.weight(1f), icon = Icons.Rounded.Add)
+                    }
                 }
             }
 
@@ -299,8 +337,29 @@ fun AddFoodScreen(vm: AppViewModel, initialMeal: String, startScan: Boolean, onC
                         Modifier.padding(top = Space.s),
                     )
                 }
+            } else if (filter == SHOPS) {
+                when {
+                    query.isBlank() -> item {
+                        DimText("Type a product or brand, like \"mandle\" or \"Tatranky\", or scan a barcode.", Modifier.padding(vertical = Space.s))
+                    }
+                    shopResults.isEmpty() && shopFor == query.trim() -> item {
+                        DimText("No shop products match \"$query\". Try fewer letters or scan the barcode.", Modifier.padding(vertical = Space.s))
+                    }
+                }
+                items(shopResults, key = { "z${it.barcode}" }) { f -> FoodRow(f) { selected = f } }
+                item {
+                    MutedText(
+                        "${vm.productCount.grouped()} products sold in Czech and Slovak shops, from Open Food Facts" +
+                            (if (vm.productsBuilt.isNotBlank()) " (updated ${vm.productsBuilt})." else "."),
+                        Modifier.padding(top = Space.s),
+                    )
+                }
             } else {
-                if (results.isEmpty()) {
+                // Library matches first, then shop products, then the rest of the library.
+                val split = if (filter == "All") 8 else Int.MAX_VALUE
+                val head = results.take(split)
+                val tail = results.drop(split)
+                if (results.isEmpty() && shopResults.isEmpty()) {
                     item {
                         DimText(
                             if (filter == MY_FOODS && custom.isEmpty()) "You haven't created any foods yet."
@@ -309,7 +368,20 @@ fun AddFoodScreen(vm: AppViewModel, initialMeal: String, startScan: Boolean, onC
                         )
                     }
                 }
-                items(results, key = { "s${it.source}${it.id}${it.name}${it.display}" }) { f -> FoodRow(f) { selected = f } }
+                items(head, key = { "s${it.source}${it.id}${it.name}${it.display}" }) { f -> FoodRow(f) { selected = f } }
+                if (shopResults.isNotEmpty()) {
+                    item(key = "shops_header") { ListHeader("In Czech & Slovak shops") }
+                    items(shopResults.take(15), key = { "z${it.barcode}" }) { f -> FoodRow(f) { selected = f } }
+                    if (shopResults.size > 15) {
+                        item(key = "shops_more") {
+                            TextButton(onClick = { filter = SHOPS }) { Text("See all shop products", color = Lime) }
+                        }
+                    }
+                }
+                if (tail.isNotEmpty()) {
+                    item(key = "more_header") { ListHeader("More foods") }
+                    items(tail, key = { "s${it.source}${it.id}${it.name}${it.display}" }) { f -> FoodRow(f) { selected = f } }
+                }
                 if (results.size >= 150) item { MutedText("Showing the first 150 matches. Add a word to narrow it down.") }
 
                 if (showOnline) {
@@ -374,6 +446,7 @@ fun AddFoodScreen(vm: AppViewModel, initialMeal: String, startScan: Boolean, onC
     }
     createDraft?.let { d ->
         CreateFoodDialog(
+            vm = vm,
             initialName = d.name,
             barcode = d.barcode,
             intro = d.intro,
@@ -554,6 +627,7 @@ private fun TypeBarcodeDialog(onDismiss: () -> Unit, onLookup: (String) -> Unit)
 
 @Composable
 private fun CreateFoodDialog(
+    vm: AppViewModel,
     initialName: String,
     barcode: String,
     intro: String?,
@@ -570,6 +644,68 @@ private fun CreateFoodDialog(
     var portionLabel by remember { mutableStateOf("") }
     var portionG by remember { mutableStateOf("") }
 
+    // Read the nutrition table from a photo with the chosen AI.
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var labelBusy by remember { mutableStateOf(false) }
+    var labelError by remember { mutableStateOf<String?>(null) }
+    var labelDone by remember { mutableStateOf(false) }
+    var pendingUri by remember { mutableStateOf<Uri?>(null) }
+
+    fun applyLabel(v: LabelValues) {
+        v.name?.let { if (name.isBlank() || name == initialName) name = it.take(60) }
+        v.kcal?.let { kcal = fmt1(it) }
+        v.protein?.let { protein = fmt1(it) }
+        v.carbs?.let { carbs = fmt1(it) }
+        v.fat?.let { fat = fmt1(it) }
+        v.sugar?.let { sugar = fmt1(it) }
+        v.fiber?.let { fiber = fmt1(it) }
+        val pack = v.packG ?: 0.0
+        val serving = v.servingG ?: 0.0
+        when {
+            pack in 1.0..250.0 -> { portionLabel = "1 pack"; portionG = fmt1(pack) }
+            serving > 0 -> { portionLabel = "1 serving"; portionG = fmt1(serving) }
+            pack > 0 -> { portionLabel = "1 pack"; portionG = fmt1(pack) }
+        }
+        labelDone = true
+    }
+
+    fun readPhoto(uri: Uri) {
+        labelBusy = true
+        labelError = null
+        scope.launch {
+            try {
+                val bmp = withContext(Dispatchers.IO) { ImageUtil.load(context, uri, 1600) }
+                    ?: throw IllegalStateException("Couldn't open that photo.")
+                applyLabel(vm.readLabel(bmp))
+            } catch (e: Exception) {
+                labelError = e.message ?: "Couldn't read the label."
+            } finally {
+                labelBusy = false
+            }
+        }
+    }
+
+    val takePicture = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { ok ->
+        val uri = pendingUri
+        if (ok && uri != null) readPhoto(uri)
+    }
+    val pickImage = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        if (uri != null) readPhoto(uri)
+    }
+
+    fun openCamera() {
+        val dir = File(context.cacheDir, "images").apply { mkdirs() }
+        val file = File(dir, "label_${System.currentTimeMillis()}.jpg")
+        val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+        pendingUri = uri
+        try {
+            takePicture.launch(uri)
+        } catch (e: ActivityNotFoundException) {
+            labelError = "No camera app found. Pick a photo instead."
+        }
+    }
+
     val p = protein.toDoubleSafe()
     val c = carbs.toDoubleSafe()
     val ft = fat.toDoubleSafe()
@@ -584,7 +720,25 @@ private fun CreateFoodDialog(
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(Space.s), modifier = Modifier.verticalScroll(rememberScrollState())) {
                 if (intro != null) Text(intro, fontSize = 14.sp)
-                DimText("Copy the \"per 100 g\" column from the package label. It's saved to My foods.", size = 13)
+                if (vm.hasKey) {
+                    PrimaryButton(
+                        if (labelBusy) "Reading the label…" else "Photo of the nutrition label",
+                        { openCamera() },
+                        Modifier.fillMaxWidth(),
+                        icon = Icons.Rounded.CameraAlt,
+                        loading = labelBusy,
+                        shape = RoundedCornerShape(Radius.inner),
+                    )
+                    TextButton(
+                        onClick = { pickImage.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+                        enabled = !labelBusy,
+                    ) { Text("or pick a label photo from the gallery", color = Lime, fontSize = 14.sp) }
+                    labelError?.let { StatusLine(false, it) }
+                    if (labelDone) StatusLine(true, "Filled from the label. Check the numbers, then save.")
+                } else {
+                    MutedText("Tip: add an AI key in Settings and the app can read the label from a photo.")
+                }
+                DimText("Or copy the \"per 100 g\" column from the package label. It's saved to My foods.", size = 13)
                 AppTextField(name, { name = it.take(60) }, "Name", Modifier.fillMaxWidth())
                 Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
                     NumberField(kcal, { kcal = it }, "kcal", Modifier.weight(1f), decimal = true)

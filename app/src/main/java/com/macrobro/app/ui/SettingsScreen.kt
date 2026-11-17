@@ -330,6 +330,13 @@ fun SettingsScreen(vm: AppViewModel) {
                 try { context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "" } catch (e: Exception) { "" }
             }
             DimText("MacroBro $version. Free, no account, no ads, no tracking.", size = 13)
+            if (vm.productCount > 0) {
+                DimText(
+                    "${vm.productCount.grouped()} Czech and Slovak shop products work offline" +
+                        (if (vm.productsBuilt.isNotBlank()) " (data from ${vm.productsBuilt})." else "."),
+                    size = 13,
+                )
+            }
             MutedText(
                 "Food data: USDA FoodData Central (public domain); Max Rubner-Institut (2025): " +
                     "Bundeslebensmittelschlüssel (BLS) 4.0, CC BY 4.0, DOI 10.25826/Data20251217-134202-0 " +

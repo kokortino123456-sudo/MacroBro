@@ -20,9 +20,11 @@ import com.macrobro.app.data.DayStat
 import com.macrobro.app.data.FoodDraft
 import com.macrobro.app.data.FoodEntry
 import com.macrobro.app.data.FoodLibrary
+import com.macrobro.app.data.LabelValues
 import com.macrobro.app.data.LibFood
 import com.macrobro.app.data.MY_FOODS
 import com.macrobro.app.data.OpenFoodFacts
+import com.macrobro.app.data.Products
 import com.macrobro.app.data.RECENT
 import com.macrobro.app.data.Settings
 import com.macrobro.app.data.SnapItem
@@ -64,6 +66,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     var libraryFoods by mutableStateOf<List<LibFood>>(emptyList())
         private set
 
+    /** Offline Czech & Slovak shop products (0 when this build has none). */
+    var productCount by mutableStateOf(0)
+        private set
+    var productsBuilt by mutableStateOf("")
+        private set
+
     // Snap / describe AI
     var snapBitmap by mutableStateOf<Bitmap?>(null)
         private set
@@ -86,6 +94,13 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             libraryFoods = withContext(Dispatchers.IO) {
                 try { FoodLibrary.loadAssets(getApplication()) } catch (e: Exception) { emptyList() }
             }
+        }
+        viewModelScope.launch {
+            val (count, built) = withContext(Dispatchers.IO) {
+                Products.count(getApplication()) to Products.builtOn(getApplication())
+            }
+            productCount = count
+            productsBuilt = built
         }
     }
 
@@ -177,10 +192,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         persist()
     }
 
-    /** Checks your own foods first (works offline), then Open Food Facts. */
+    /** Checks your own foods, then the offline CZ/SK shop products, then Open Food Facts online. */
     suspend fun lookupBarcode(code: String): BarcodeResult {
         val digits = code.filter { it.isDigit() }
         customFoods.firstOrNull { it.barcode.isNotBlank() && it.barcode == digits }?.let { return BarcodeResult.Found(it) }
+        withContext(Dispatchers.IO) { Products.byBarcode(getApplication(), digits) }?.let { return BarcodeResult.Found(it) }
         val result = OpenFoodFacts.lookup(digits)
         if (result is BarcodeResult.Found) {
             // Keep scanned products in My foods so the next scan works offline.
@@ -190,6 +206,34 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     suspend fun searchOnline(query: String): List<LibFood> = OpenFoodFacts.search(query)
+
+    suspend fun searchProducts(query: String): List<LibFood> =
+        withContext(Dispatchers.IO) { Products.search(getApplication(), query) }
+
+    /** Reads a nutrition label photo with the chosen AI. Throws with a readable message. */
+    suspend fun readLabel(photo: Bitmap): LabelValues {
+        val client = Ai.client(settings) ?: throw IllegalStateException(Ai.missingKeyMessage(settings))
+        val b64 = withContext(Dispatchers.Default) { ImageUtil.toJpegBase64(photo, quality = 90) }
+        val reply = client.complete(
+            Prompts.LABEL_SYSTEM,
+            listOf(AiMessage("user", "Read this nutrition label.", b64)),
+            json = true, temperature = 0.0,
+        )
+        val start = reply.indexOf('{')
+        val end = reply.lastIndexOf('}')
+        if (start < 0 || end <= start) throw IllegalStateException("Couldn't read the label. Try a sharper, closer photo.")
+        val o = JSONObject(reply.substring(start, end + 1))
+        fun n(key: String): Double? = o.optDouble(key, Double.NaN).takeIf { !it.isNaN() && it >= 0 }
+        val values = LabelValues(
+            name = o.optString("name", "").takeIf { it.isNotBlank() && it != "null" },
+            kcal = n("kcal"), protein = n("protein"), carbs = n("carbs"), sugar = n("sugar"),
+            fat = n("fat"), fiber = n("fiber"), servingG = n("serving_g"), packG = n("pack_g"),
+        )
+        if (values.kcal == null && values.protein == null && values.carbs == null && values.fat == null) {
+            throw IllegalStateException("No nutrition table found. Photograph the table on the back of the pack.")
+        }
+        return values
+    }
 
     // ---------- Water ----------
 

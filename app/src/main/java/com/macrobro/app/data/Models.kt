@@ -98,6 +98,19 @@ data class AppData(
     val water: Map<String, Int> = emptyMap(), // date -> ml
 )
 
+/** Nutrition read from a photo of a package label, per 100 g. Null = not readable. */
+data class LabelValues(
+    val name: String?,
+    val kcal: Double?,
+    val protein: Double?,
+    val carbs: Double?,
+    val sugar: Double?,
+    val fat: Double?,
+    val fiber: Double?,
+    val servingG: Double?,
+    val packG: Double?,
+)
+
 /** One day's totals, for charts and Gym Bro's weekly context. */
 data class DayStat(
     val date: LocalDate,
@@ -139,6 +152,9 @@ data class SnapItem(
 fun fmtG(v: Double): String =
     if (v < 10 && v != v.roundToInt().toDouble()) String.format(Locale.US, "%.1f", v)
     else v.roundToInt().toString()
+
+/** One decimal without a trailing .0: 21.3, 617. */
+fun fmt1(v: Double): String = String.format(Locale.US, "%.1f", v).removeSuffix(".0")
 
 /** Body weight with one decimal: 78.4, 80. */
 fun fmtKg(v: Double): String = String.format(Locale.US, "%.1f", v).removeSuffix(".0")

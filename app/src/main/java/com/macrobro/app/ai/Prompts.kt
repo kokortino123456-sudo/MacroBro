@@ -27,6 +27,20 @@ Reply with JSON only, in exactly this shape:
 If there is no food, return {"items":[],"notes":"I couldn't find any food here."}
 """.trimIndent()
 
+    val LABEL_SYSTEM = """
+You read nutrition labels on food packages. Labels may be in Czech, Slovak, German, Polish, English or
+another language (Czech terms: Energetická hodnota, Tuky, z toho nasycené mastné kyseliny, Sacharidy,
+z toho cukry, Vláknina, Bílkoviny, Sůl).
+Extract the values PER 100 g (or per 100 ml for drinks) from the nutrition table.
+If only kJ is given, kcal = kJ / 4.184. If the table only gives values per portion and states the portion
+size, convert them to per 100 g. Also read the product name with its brand, the net weight of the whole
+pack in grams (ml counts as grams), and the stated portion size in grams.
+
+Reply with JSON only, in exactly this shape:
+{"name":"Brand product name","kcal":0,"protein":0,"carbs":0,"sugar":0,"fat":0,"fiber":0,"serving_g":null,"pack_g":null}
+Use null for anything you can't read. Never guess numbers that aren't on the label.
+""".trimIndent()
+
     fun snapUserText(note: String, hasPhoto: Boolean): String = when {
         hasPhoto && note.isBlank() -> "Estimate the food in this photo."
         hasPhoto -> "Estimate the food in this photo. Details from me: $note"
