@@ -26,11 +26,17 @@ class Store(context: Context) {
         return (0 until arr.length()).mapNotNull { arr.optJSONObject(it)?.let(ChatMsg::fromJson) }
     }
 
-    fun saveData(entries: List<FoodEntry>, chat: List<ChatMsg>) {
+    fun loadCustomFoods(): List<LibFood> {
+        val arr = readRoot().optJSONArray("customFoods") ?: return emptyList()
+        return (0 until arr.length()).mapNotNull { arr.optJSONObject(it)?.let(LibFood::customFromJson) }
+    }
+
+    fun saveData(entries: List<FoodEntry>, chat: List<ChatMsg>, customFoods: List<LibFood>) {
         val root = JSONObject()
-            .put("version", 1)
+            .put("version", 2)
             .put("entries", JSONArray().apply { entries.forEach { put(it.toJson()) } })
             .put("chat", JSONArray().apply { chat.takeLast(200).forEach { put(it.toJson()) } })
+            .put("customFoods", JSONArray().apply { customFoods.forEach { put(it.toJson()) } })
         val tmp = File(file.parentFile, file.name + ".tmp")
         tmp.writeText(root.toString())
         if (!tmp.renameTo(file)) {

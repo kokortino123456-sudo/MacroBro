@@ -26,6 +26,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
@@ -33,6 +34,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -40,6 +42,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -67,9 +70,12 @@ fun TodayScreen(vm: AppViewModel, onSnap: () -> Unit) {
     val date = vm.selectedDate
     val dayEntries = vm.entriesFor(date)
     val t = totalsOf(dayEntries)
-    var addMeal by remember { mutableStateOf<String?>(null) }
+    var addMeal by rememberSaveable { mutableStateOf<String?>(null) }
 
-    LazyColumn(
+    val openMeal = addMeal
+    if (openMeal != null) {
+        AddFoodScreen(vm, openMeal, onClose = { addMeal = null })
+    } else LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -126,14 +132,25 @@ fun TodayScreen(vm: AppViewModel, onSnap: () -> Unit) {
         }
 
         item {
-            Button(
-                onClick = onSnap,
-                modifier = Modifier.fillMaxWidth().height(52.dp),
-                shape = RoundedCornerShape(16.dp),
-            ) {
-                Icon(Icons.Filled.CameraAlt, null)
-                Spacer(Modifier.width(8.dp))
-                Text("Snap your food", fontWeight = FontWeight.Bold)
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedButton(
+                    onClick = { addMeal = vm.defaultMeal() },
+                    modifier = Modifier.weight(1f).height(52.dp),
+                    shape = RoundedCornerShape(16.dp),
+                ) {
+                    Icon(Icons.Filled.Search, null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Find food")
+                }
+                Button(
+                    onClick = onSnap,
+                    modifier = Modifier.weight(1f).height(52.dp),
+                    shape = RoundedCornerShape(16.dp),
+                ) {
+                    Icon(Icons.Filled.CameraAlt, null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Snap food", fontWeight = FontWeight.Bold)
+                }
             }
         }
 
@@ -158,17 +175,6 @@ fun TodayScreen(vm: AppViewModel, onSnap: () -> Unit) {
         item { Spacer(Modifier.height(24.dp)) }
     }
 
-    addMeal?.let { meal ->
-        AddFoodDialog(
-            meal = meal,
-            recent = vm.recentFoods(),
-            onDismiss = { addMeal = null },
-            onAdd = { draft ->
-                vm.addFoods(listOf(draft), meal, "manual")
-                addMeal = null
-            },
-        )
-    }
 }
 
 private fun dayTitle(date: LocalDate): String {
@@ -210,7 +216,7 @@ private fun EntryRow(e: FoodEntry, onDelete: () -> Unit) {
 }
 
 @Composable
-private fun AddFoodDialog(
+internal fun AddFoodDialog(
     meal: String,
     recent: List<FoodEntry>,
     onDismiss: () -> Unit,

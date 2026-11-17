@@ -13,6 +13,10 @@ import com.macrobro.app.ai.Prompts
 import com.macrobro.app.data.ChatMsg
 import com.macrobro.app.data.FoodDraft
 import com.macrobro.app.data.FoodEntry
+import com.macrobro.app.data.FoodLibrary
+import com.macrobro.app.data.LibFood
+import com.macrobro.app.data.MY_FOODS
+import com.macrobro.app.data.RECENT
 import com.macrobro.app.data.Settings
 import com.macrobro.app.data.SnapItem
 import com.macrobro.app.data.Store
@@ -40,6 +44,20 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         private set
     var selectedDate by mutableStateOf(LocalDate.now())
 
+    // Food library: bundled USDA foods + the user's own foods
+    var libraryFoods by mutableStateOf<List<LibFood>>(emptyList())
+        private set
+    var customFoods by mutableStateOf(store.loadCustomFoods())
+        private set
+
+    init {
+        viewModelScope.launch {
+            libraryFoods = withContext(Dispatchers.IO) {
+                try { FoodLibrary.loadAssets(getApplication()) } catch (e: Exception) { emptyList() }
+            }
+        }
+    }
+
     // Snap Food AI state
     var snapBitmap by mutableStateOf<Bitmap?>(null)
         private set
@@ -65,6 +83,28 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     fun recentFoods(): List<FoodEntry> =
         entries.sortedByDescending { it.id }.distinctBy { it.name.lowercase() }.take(12)
+
+    /** Recently logged foods that had a weight, turned back into per-100 g foods. */
+    fun recentLibFoods(): List<LibFood> = recentFoods().filter { it.grams > 0 }.map { e ->
+        val k = 100.0 / e.grams
+        LibFood(
+            name = e.name, display = e.name, category = RECENT,
+            kcal = e.kcal * k, protein = e.protein * k, carbs = e.carbs * k, fat = e.fat * k,
+            portionLabel = "last time", portionG = e.grams.toDouble(),
+        )
+    }
+
+    fun addCustomFood(food: LibFood): LibFood {
+        val saved = food.copy(id = newId(), custom = true, category = MY_FOODS, display = food.name)
+        customFoods = customFoods + saved
+        persistData()
+        return saved
+    }
+
+    fun deleteCustomFood(id: Long) {
+        customFoods = customFoods.filterNot { it.id == id }
+        persistData()
+    }
 
     fun defaultMeal(): String {
         val h = LocalTime.now().hour
@@ -98,9 +138,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private fun persistData() {
         val e = entries
         val c = chat
+        val f = customFoods
         viewModelScope.launch(Dispatchers.IO) {
             saveMutex.withLock {
-                try { store.saveData(e, c) } catch (_: Exception) { }
+                try { store.saveData(e, c, f) } catch (_: Exception) { }
             }
         }
     }
