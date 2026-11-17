@@ -3,6 +3,23 @@ package com.macrobro.app.ui
 import androidx.compose.foundation.layout.imePadding
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
+import com.macrobro.app.data.DEFAULT_OPENROUTER_MODEL
+import com.macrobro.app.ai.OrModel
+import com.macrobro.app.ai.Ai
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.Alignment
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material.icons.rounded.Search
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -69,9 +86,13 @@ fun SettingsScreen(vm: AppViewModel) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
+    var provider by remember(s) { mutableStateOf(s.provider) }
     var apiKey by remember(s) { mutableStateOf(s.apiKey) }
     var model by remember(s) { mutableStateOf(s.model) }
+    var orKey by remember(s) { mutableStateOf(s.openRouterKey) }
+    var orModel by remember(s) { mutableStateOf(s.openRouterModel) }
     var showKey by remember { mutableStateOf(false) }
+    var pickModel by remember { mutableStateOf(false) }
     var testResult by remember { mutableStateOf<Pair<Boolean, String>?>(null) }
     var testing by remember { mutableStateOf(false) }
 
@@ -93,8 +114,11 @@ fun SettingsScreen(vm: AppViewModel) {
     var confirmDelete by remember { mutableStateOf(false) }
 
     fun current() = s.copy(
+        provider = provider,
         apiKey = apiKey.trim(),
         model = model.trim().ifBlank { DEFAULT_MODEL },
+        openRouterKey = orKey.trim(),
+        openRouterModel = orModel.trim().ifBlank { DEFAULT_OPENROUTER_MODEL },
         sex = sex,
         age = age.toIntSafe().coerceIn(10, 100),
         heightCm = height.toIntSafe().coerceIn(100, 250),
@@ -149,51 +173,88 @@ fun SettingsScreen(vm: AppViewModel) {
         ScreenTitle("Settings")
 
         SectionCard {
-            SectionTitle("Gemini AI")
-            DimText("Snap and Gym Bro use Google Gemini. Get a free key and paste it here. It stays on this phone.", size = 13)
-            TextButton(onClick = { uri.openUri("https://aistudio.google.com/apikey") }) {
-                Icon(Icons.Rounded.Key, null, tint = Lime)
-                Spacer(Modifier.width(Space.s))
-                Text("Get a free key at aistudio.google.com", color = Lime)
-            }
-            AppTextField(
-                value = apiKey,
-                onValueChange = { apiKey = it.trim(); testResult = null; saved = false },
-                label = "API key",
-                visualTransformation = if (showKey) VisualTransformation.None else PasswordVisualTransformation(),
-                trailing = {
-                    IconButton(onClick = { showKey = !showKey }) {
-                        BlurSwap(showKey) { visible ->
-                            Icon(
-                                if (visible) Icons.Rounded.VisibilityOff else Icons.Rounded.Visibility,
-                                if (visible) "Hide key" else "Show key",
-                            )
+            SectionTitle("AI")
+            DimText("Snap and Gym Bro need an AI provider. Keys stay on this phone.", size = 13)
+            ChoiceChips(
+                listOf(Ai.GEMINI to "Google Gemini", Ai.OPENROUTER to "OpenRouter"),
+                provider,
+                { provider = it; testResult = null; saved = false },
+            )
+            val keyField: @Composable (String, (String) -> Unit, String) -> Unit = { value, onChange, label ->
+                AppTextField(
+                    value = value,
+                    onValueChange = { onChange(it.trim()); testResult = null; saved = false },
+                    label = label,
+                    visualTransformation = if (showKey) VisualTransformation.None else PasswordVisualTransformation(),
+                    trailing = {
+                        IconButton(onClick = { showKey = !showKey }) {
+                            BlurSwap(showKey) { visible ->
+                                Icon(
+                                    if (visible) Icons.Rounded.VisibilityOff else Icons.Rounded.Visibility,
+                                    if (visible) "Hide key" else "Show key",
+                                )
+                            }
                         }
-                    }
-                },
-                modifier = Modifier.fillMaxWidth(),
-            )
-            AppTextField(
-                value = model,
-                onValueChange = { model = it.trim(); testResult = null; saved = false },
-                label = "Model",
-                supporting = "Default: $DEFAULT_MODEL",
-                modifier = Modifier.fillMaxWidth(),
-            )
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+            if (provider == Ai.OPENROUTER) {
+                MutedText("One key for hundreds of models, many of them free. The free router picks a free model that can handle photos.")
+                TextButton(onClick = { uri.openUri("https://openrouter.ai/keys") }) {
+                    Icon(Icons.Rounded.Key, null, tint = Lime)
+                    Spacer(Modifier.width(Space.s))
+                    Text("Get a key at openrouter.ai/keys", color = Lime)
+                }
+                keyField(orKey, { orKey = it }, "OpenRouter API key")
+                AppTextField(
+                    value = orModel,
+                    onValueChange = { orModel = it.trim(); testResult = null; saved = false },
+                    label = "Model",
+                    supporting = "Default: $DEFAULT_OPENROUTER_MODEL (free, picks a model for you)",
+                    trailing = {
+                        IconButton(onClick = { pickModel = true }) { Icon(Icons.Rounded.Search, "Choose a model") }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                SecondaryButton(
+                    "Choose a model", { pickModel = true },
+                    icon = Icons.Rounded.Search, shape = RoundedCornerShape(Radius.inner),
+                )
+            } else {
+                MutedText("Google's free tier covers normal use of this app.")
+                TextButton(onClick = { uri.openUri("https://aistudio.google.com/apikey") }) {
+                    Icon(Icons.Rounded.Key, null, tint = Lime)
+                    Spacer(Modifier.width(Space.s))
+                    Text("Get a free key at aistudio.google.com", color = Lime)
+                }
+                keyField(apiKey, { apiKey = it }, "Gemini API key")
+                AppTextField(
+                    value = model,
+                    onValueChange = { model = it.trim(); testResult = null; saved = false },
+                    label = "Model",
+                    supporting = "Default: $DEFAULT_MODEL",
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+            val keyPresent = if (provider == Ai.OPENROUTER) orKey.isNotBlank() else apiKey.isNotBlank()
             SecondaryButton(
                 if (testing) "Testing…" else "Test key",
                 {
                     testing = true
                     testResult = null
                     scope.launch {
-                        testResult = vm.testConnection(apiKey, model.ifBlank { DEFAULT_MODEL })
+                        testResult = vm.testConnection(current())
                         testing = false
                     }
                 },
-                enabled = apiKey.isNotBlank() && !testing,
+                enabled = keyPresent && !testing,
                 shape = RoundedCornerShape(Radius.inner),
             )
             testResult?.let { (ok, msg) -> StatusLine(ok, msg) }
+            if (provider != s.provider || orKey != s.openRouterKey || apiKey != s.apiKey) {
+                MutedText("Tap Save at the bottom to use these settings.")
+            }
         }
 
         SectionCard {
@@ -270,9 +331,12 @@ fun SettingsScreen(vm: AppViewModel) {
             }
             DimText("MacroBro $version. Free, no account, no ads, no tracking.", size = 13)
             MutedText(
-                "Food data: USDA FoodData Central (public domain); categories by TempoLife (CC-BY-4.0); " +
+                "Food data: USDA FoodData Central (public domain); Max Rubner-Institut (2025): " +
+                    "Bundeslebensmittelschlüssel (BLS) 4.0, CC BY 4.0, DOI 10.25826/Data20251217-134202-0 " +
+                    "(energy calculated from macros with EU factors); USDA categories by TempoLife (CC-BY-4.0); " +
                     "packaged foods from Open Food Facts (ODbL). Font: Barlow (SIL Open Font License). " +
-                    "AI answers come from Google Gemini; photos and chat messages are sent there to get answers."
+                    "AI answers come from the provider you pick (Google Gemini or OpenRouter); photos and chat " +
+                    "messages are sent there to get answers."
             )
         }
         Spacer(Modifier.height(Space.xl))
@@ -300,6 +364,14 @@ fun SettingsScreen(vm: AppViewModel) {
             dismissButton = { TextButton(onClick = { pendingImport = null }) { Text("Cancel", color = TextDim) } },
         )
     }
+    if (pickModel) {
+        ModelPickerDialog(
+            vm = vm,
+            current = orModel,
+            onDismiss = { pickModel = false },
+            onPick = { orModel = it; pickModel = false; testResult = null; saved = false },
+        )
+    }
     if (confirmDelete) {
         AlertDialog(
             onDismissRequest = { confirmDelete = false },
@@ -321,5 +393,91 @@ fun SettingsScreen(vm: AppViewModel) {
             },
             dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Cancel", color = TextDim) } },
         )
+    }
+}
+
+@Composable
+private fun ModelPickerDialog(vm: AppViewModel, current: String, onDismiss: () -> Unit, onPick: (String) -> Unit) {
+    var models by remember { mutableStateOf<List<OrModel>?>(null) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var query by remember { mutableStateOf("") }
+    var freeOnly by remember { mutableStateOf(true) }
+    var photosOnly by remember { mutableStateOf(true) }
+
+    LaunchedEffect(Unit) {
+        try {
+            models = vm.openRouterModels()
+        } catch (e: Exception) {
+            error = e.message ?: "Couldn't load models."
+        }
+    }
+
+    val shown = remember(models, query, freeOnly, photosOnly) {
+        val q = query.trim().lowercase()
+        models.orEmpty().filter { m ->
+            (!freeOnly || m.free) && (!photosOnly || m.vision) &&
+                (q.isEmpty() || m.id.lowercase().contains(q) || m.name.lowercase().contains(q))
+        }.take(200)
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = Surface2,
+        title = { Text("Choose a model") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
+                AppTextField(query, { query = it.take(40) }, null, Modifier.fillMaxWidth(), placeholder = "Search models")
+                Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
+                    AppChip("Free", freeOnly, { freeOnly = !freeOnly })
+                    AppChip("Sees photos", photosOnly, { photosOnly = !photosOnly })
+                }
+                MutedText("Snap needs a model that sees photos. Gym Bro works with any model.")
+                LazyColumn(Modifier.heightIn(max = 360.dp), verticalArrangement = Arrangement.spacedBy(Space.xs)) {
+                    item {
+                        ModelRow(
+                            title = "Free router (recommended)",
+                            sub = "$DEFAULT_OPENROUTER_MODEL · picks a free model that fits each request",
+                            selected = current == DEFAULT_OPENROUTER_MODEL,
+                            onClick = { onPick(DEFAULT_OPENROUTER_MODEL) },
+                        )
+                    }
+                    when {
+                        error != null -> item { StatusLine(false, error ?: "") }
+                        models == null -> item {
+                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(Space.s)) {
+                                CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp, color = Lime)
+                                Spacer(Modifier.width(Space.s))
+                                DimText("Loading models…", size = 13)
+                            }
+                        }
+                        shown.isEmpty() -> item { DimText("No models match.", size = 13) }
+                    }
+                    items(shown, key = { it.id }) { m ->
+                        val tags = listOfNotNull(
+                            if (m.free) "Free" else null,
+                            if (m.vision) "Photos" else null,
+                            if (m.contextLength > 0) "${m.contextLength / 1000}k context" else null,
+                        ).joinToString(" · ")
+                        ModelRow(m.name, "${m.id}${if (tags.isNotEmpty()) " · $tags" else ""}", current == m.id) { onPick(m.id) }
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Close", color = TextDim) } },
+    )
+}
+
+@Composable
+private fun ModelRow(title: String, sub: String, selected: Boolean, onClick: () -> Unit) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(Radius.inner))
+            .background(if (selected) Lime.copy(alpha = 0.14f) else Color.Transparent)
+            .clickable(onClick = onClick)
+            .padding(horizontal = Space.m, vertical = Space.s),
+    ) {
+        Text(title, fontSize = 15.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(sub, color = TextMuted, fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
     }
 }

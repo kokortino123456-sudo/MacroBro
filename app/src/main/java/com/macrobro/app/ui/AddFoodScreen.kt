@@ -151,18 +151,29 @@ fun AddFoodScreen(vm: AppViewModel, initialMeal: String, startScan: Boolean, onC
     val custom = vm.customFoods
     val recent = remember(vm.entries) { vm.recentLibFoods() }
     val browsing = query.isBlank() && filter == "All"
+    val isCuisine = filter in FoodLibrary.CUISINES
+    // World dishes / a single cuisine without a query: show every dish, grouped by country.
+    val browsingDishes = query.isBlank() && (filter == FoodLibrary.WORLD || isCuisine)
+    val dishes = remember(library) { library.filter { it.isDish } }
     val results = remember(query, filter, library, custom, recent) {
-        if (browsing) emptyList() else {
-            val pool: List<LibFood> = when (filter) {
-                "All" -> custom + library
-                MY_FOODS -> custom
-                RECENT -> recent
-                else -> library.filter { it.category == filter }
+        if (browsing || browsingDishes) emptyList() else {
+            val pool: List<LibFood> = when {
+                filter == "All" -> custom + library
+                filter == MY_FOODS -> custom
+                filter == RECENT -> recent
+                filter == FoodLibrary.WORLD -> library.filter { it.isDish }
+                filter in FoodLibrary.CUISINES -> library.filter { it.isDish && it.category == filter }
+                else -> library.filter { it.category == filter && !it.isDish }
             }
             FoodLibrary.search(pool, query)
         }
     }
     val popular = remember(library) { library.filter { it.popular > 0 }.sortedBy { it.popular } }
+    val chipOptions = remember(filter) {
+        val base = listOf("All", MY_FOODS, RECENT, FoodLibrary.WORLD, "Czech", "Polish", "German")
+        val extra = if (filter in FoodLibrary.CUISINES && filter !in base) listOf(filter) else emptyList()
+        (base + extra + FoodLibrary.CATEGORIES).map { it to it }
+    }
     val showOnline = query.isNotBlank() && filter == "All"
 
     Column(Modifier.fillMaxSize().imePadding()) {
@@ -205,7 +216,7 @@ fun AddFoodScreen(vm: AppViewModel, initialMeal: String, startScan: Boolean, onC
         )
 
         ChipRow(
-            options = (listOf("All", MY_FOODS, RECENT) + FoodLibrary.CATEGORIES).map { it to it },
+            options = chipOptions,
             selected = filter,
             onSelect = { filter = it },
             modifier = Modifier.padding(vertical = Space.s),
@@ -262,9 +273,32 @@ fun AddFoodScreen(vm: AppViewModel, initialMeal: String, startScan: Boolean, onC
                     item { ListHeader(RECENT) }
                     items(recent.take(6), key = { "r${it.name}" }) { f -> FoodRow(f) { selected = f } }
                 }
+                item {
+                    Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
+                        ListHeader("Dishes by country")
+                        CuisineChips { filter = it }
+                    }
+                }
                 item { ListHeader("Popular") }
                 if (library.isEmpty()) item { DimText("Loading foods…") }
                 items(popular, key = { "p${it.popular}" }) { f -> FoodRow(f) { selected = f } }
+            } else if (browsingDishes) {
+                val cuisines = if (isCuisine) listOf(filter) else FoodLibrary.CUISINES
+                if (library.isEmpty()) item { DimText("Loading foods…") }
+                cuisines.forEach { cuisine ->
+                    val group = dishes.filter { it.category == cuisine }
+                    if (group.isNotEmpty()) {
+                        item(key = "h_$cuisine") { ListHeader(cuisine) }
+                        items(group, key = { "w${it.id}" }) { f -> FoodRow(f) { selected = f } }
+                    }
+                }
+                item {
+                    MutedText(
+                        "Dishes use values from official databases. A ≈ means no database has that exact dish, " +
+                            "so the closest similar dish is used.",
+                        Modifier.padding(top = Space.s),
+                    )
+                }
             } else {
                 if (results.isEmpty()) {
                     item {
@@ -301,8 +335,10 @@ fun AddFoodScreen(vm: AppViewModel, initialMeal: String, startScan: Boolean, onC
 
             item {
                 MutedText(
-                    "Food data: USDA FoodData Central (public domain), categories by TempoLife (CC-BY-4.0), " +
-                        "packaged foods from Open Food Facts (ODbL). Values per 100 g.",
+                    "Food data: USDA FoodData Central (public domain); Bundeslebensmittelschlüssel (BLS) 4.0, " +
+                        "Max Rubner-Institut, CC BY 4.0 (energy calculated from macros with EU factors); " +
+                        "USDA categories by TempoLife (CC-BY-4.0); packaged foods from Open Food Facts (ODbL). " +
+                        "Values per 100 g.",
                     Modifier.padding(top = Space.l),
                 )
             }
@@ -375,6 +411,7 @@ private fun FoodRow(food: LibFood, onClick: () -> Unit) {
             Text(food.display, fontWeight = FontWeight.Medium, fontSize = 16.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
             val sub = when {
                 food.source == "recent" -> "Last time ${food.portionG.roundToInt()} g"
+                food.note.isNotBlank() -> food.note
                 food.display != food.name -> food.name
                 else -> food.category
             }
@@ -421,7 +458,10 @@ private fun AmountDialog(
         title = { Text(food.display, maxLines = 2, overflow = TextOverflow.Ellipsis) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(Space.m), modifier = Modifier.verticalScroll(rememberScrollState())) {
-                if (food.display != food.name && food.source != "recent") MutedText(food.name)
+                when {
+                    food.note.isNotBlank() -> MutedText(food.note)
+                    food.display != food.name && food.source != "recent" -> MutedText(food.name)
+                }
                 FlowRow(
                     horizontalArrangement = Arrangement.spacedBy(Space.s),
                     verticalArrangement = Arrangement.spacedBy(Space.xs),
@@ -441,7 +481,14 @@ private fun AmountDialog(
                     NutrientCell("Fiber", food.fiber * f, Modifier.weight(1f))
                 }
                 if (food.fiber > 0) {
-                    DimText("Net carbs (carbs minus fiber): ${fmtG((d.carbs - food.fiber * f).coerceAtLeast(0.0))} g", size = 13)
+                    if (food.fiberInCarbs) {
+                        DimText("Net carbs (carbs minus fiber): ${fmtG((d.carbs - food.fiber * f).coerceAtLeast(0.0))} g", size = 13)
+                    } else {
+                        DimText("Carbs here already exclude fiber (EU style), so they are net carbs.", size = 13)
+                    }
+                }
+                if (food.note.contains("≈")) {
+                    MutedText("No database has this exact dish, so the values come from the closest similar dish.")
                 }
                 MutedText("Per 100 g: ${food.kcal.roundToInt()} kcal · C ${fmtG(food.carbs)} · P ${fmtG(food.protein)} · F ${fmtG(food.fat)}")
                 ChoiceChips(MEALS.map { it to it }, meal, onMealChange)
@@ -579,4 +626,15 @@ private fun CreateFoodDialog(
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel", color = TextDim) } },
     )
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun CuisineChips(onPick: (String) -> Unit) {
+    FlowRow(
+        horizontalArrangement = Arrangement.spacedBy(Space.s),
+        verticalArrangement = Arrangement.spacedBy(Space.xs),
+    ) {
+        FoodLibrary.CUISINES.forEach { c -> AppChip(c, false, { onPick(c) }) }
+    }
 }

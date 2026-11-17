@@ -1,7 +1,15 @@
-"""Builds app/src/main/assets/foods.tsv from the USDA SR Legacy rows of the
-tempo-food-db npm package (data/tempolife-foods.csv).
+"""Builds app/src/main/assets/foods.tsv for MacroBro.
 
-Usage: python3 tools/build_food_db.py path/to/tempolife-foods.csv app/src/main/assets/foods.tsv
+Sources (all openly licensed):
+  - USDA FoodData Central SR Legacy (public domain), via the tempo-food-db npm package
+    (data/tempolife-foods.csv; categories by TempoLife, CC-BY-4.0)
+  - Bundeslebensmittelschluessel (BLS) 4.0, Max Rubner-Institut, CC BY 4.0, via the
+    @thereforejs/foods npm package (dist/index.mjs, parsed as data, never executed).
+    Energy is calculated from the macronutrients with the EU Regulation 1169/2011 factors.
+  - tools/world_dishes.py: curated national dishes mapped to entries of the two above.
+
+Usage:
+  python3 tools/build_food_db.py tempolife-foods.csv thereforejs-index.mjs app/src/main/assets/foods.tsv
 """
 import csv
 import sys
@@ -141,6 +149,14 @@ POPULAR = [
 ]
 
 
+import json
+import os
+import re
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from world_dishes import CUISINES  # noqa: E402
+
+
 def num(s):
     try:
         return round(float(s), 1)
@@ -152,33 +168,156 @@ def fmt(v):
     return ("%g" % v)
 
 
-def main(src, dst):
-    rows = [r for r in csv.DictReader(open(src, encoding="utf-8")) if r["source"] == "usda_sr_legacy"]
-    by_name = {}
-    for r in rows:
-        by_name.setdefault(r["name"], r)  # first wins for duplicate names
+def clean(s):
+    return (s or "").replace("\t", " ").replace("\n", " ").strip()
 
-    out, used = [], set()
-    for rank, (friendly, candidates, plabel, pgrams) in enumerate(POPULAR, start=1):
-        r = next((by_name[c] for c in candidates if c in by_name), None)
-        if r is None:
-            print("MISSING popular:", friendly, candidates, file=sys.stderr)
+
+# ---------- BLS 4.0 ----------
+
+def parse_bls(path):
+    src = open(path, encoding="utf-8").read()
+    foods = []
+    for m in re.finditer(r'^const ([A-Z][A-Z0-9_]*) = (\{.*?^\});', src, re.S | re.M):
+        try:
+            foods.append(json.loads(m.group(2)))
+        except json.JSONDecodeError:
+            pass
+    return foods
+
+
+def bls_value(f, key):
+    v = f["per100g"].get(key)
+    if v is None:
+        # A mark (<LOD, <LOQ, TR) means "too little to measure": count it as 0.
+        return 0.0 if key in f.get("marks", {}) else None
+    return float(v)
+
+
+def bls_nutrition(f):
+    p, c, fat = (bls_value(f, k) for k in ("protein", "carbohydrate", "fat"))
+    if p is None or c is None or fat is None:
+        return None
+    g = lambda k: bls_value(f, k) or 0.0
+    polyols = g("polyols")
+    # EU Regulation 1169/2011 Annex XIV energy conversion factors
+    kcal = 4 * (c - polyols) + 2.4 * polyols + 4 * p + 9 * fat + 7 * g("alcohol") + 3 * g("organicAcids") + 2 * g("fibre")
+    return dict(kcal=kcal, protein=p, carbs=c, fat=fat, fiber=g("fibre"), sugar=g("sugars"))
+
+
+LEGUME_WORDS = ("bean", "lentil", "pea ", "peas", "chickpea", "soy", "soya", "tofu", "tempeh", "lupin", "hummus")
+
+
+def bls_category(code, en):
+    a, b = code[0], code[1] if len(code) > 1 else ""
+    if a == "B": return "Bread & bakery"
+    if a == "C": return "Grains & pasta"
+    if a == "D": return "Sweets & desserts"
+    if a == "E": return "Eggs" if b in "123" else "Grains & pasta"
+    if a == "F": return "Fruit"
+    if a == "G": return "Vegetables"
+    if a == "H": return "Beans & legumes" if any(w in en.lower() + " " for w in LEGUME_WORDS) else "Nuts & seeds"
+    if a == "K": return "Vegetables" if b == "7" else "Potatoes"
+    if a == "M": return "Dairy"
+    if a in "NP": return "Drinks"
+    if a == "Q": return "Fats & oils"
+    if a == "R": return "Sauces" if b == "1" else "Spices"
+    if a == "S": return "Sweets & desserts"
+    if a == "T": return "Fish & seafood"
+    if a in "UVW": return "Meat & poultry"
+    if a == "X":
+        return {"1": "Salads", "2": "Salads", "3": "Sauces", "4": "Soups", "5": "Vegetables",
+                "6": "Potatoes", "7": "Grains & pasta"}.get(b, "Meals & fast food")
+    if a == "Y": return "Sweets & desserts" if b == "8" else "Meals & fast food"
+    return "Other"
+
+
+# ---------- build ----------
+
+COLUMNS = ["name", "display", "category", "kcal", "protein", "carbs", "fat", "fiber", "sugar",
+           "popular", "portionLabel", "portionG", "source", "aliases", "note"]
+
+
+def row(name, display, category, n, popular=0, plabel="", pgrams=0, source="", aliases="", note=""):
+    return [clean(name), clean(display), category,
+            fmt(round(n["kcal"])), fmt(num(n["protein"])), fmt(num(n["carbs"])), fmt(num(n["fat"])),
+            fmt(num(n["fiber"])), fmt(num(n["sugar"])),
+            str(popular), clean(plabel), fmt(pgrams or 0), source, clean(aliases), clean(note)]
+
+
+def main(usda_csv, bls_mjs, dst):
+    usda_rows = [r for r in csv.DictReader(open(usda_csv, encoding="utf-8")) if r["source"] == "usda_sr_legacy"]
+    usda = {}
+    for r in usda_rows:
+        usda.setdefault(r["name"], r)
+    usda_n = {k: dict(kcal=num(r["calories"]), protein=num(r["protein"]), carbs=num(r["carbs"]), fat=num(r["fat"]),
+                      fiber=num(r["fiber"]), sugar=num(r["sugar"])) for k, r in usda.items()}
+
+    bls = {}
+    for f in parse_bls(bls_mjs):
+        if not f["sources"] or f["sources"][0]["source"] != "bls-4.0":
             continue
-        used.add(r["name"])
-        out.append((r, friendly, rank, plabel or "", pgrams or 0))
-    for name, r in by_name.items():
-        if name not in used:
-            out.append((r, "", 0, "", 0))
+        n = bls_nutrition(f)
+        if n is not None:
+            bls[f["code"]] = (f, n)
 
-    with open(dst, "w", encoding="utf-8") as f:
-        f.write("# Food data: USDA FoodData Central SR Legacy (public domain); categories via TempoLife food dataset (CC-BY-4.0)\n")
-        for r, friendly, rank, plabel, pgrams in out:
-            cat = CATEGORIES.get(r["category"], "Other")
-            vals = [num(r[k]) for k in ("calories", "protein", "carbs", "fat", "fiber", "sugar")]
-            f.write("\t".join([r["name"].replace("\t", " "), friendly, cat] + [fmt(v) for v in vals]
-                              + [str(rank), plabel, fmt(pgrams)]) + "\n")
-    print(f"wrote {len(out)} foods ({sum(1 for o in out if o[2])} popular) to {dst}")
+    out = []
+    # 1) popular USDA foods with friendly names
+    used = set()
+    for rank, (friendly, candidates, plabel, pgrams) in enumerate(POPULAR, start=1):
+        name = next((c for c in candidates if c in usda), None)
+        if name is None:
+            print("MISSING popular:", friendly, file=sys.stderr)
+            continue
+        used.add(name)
+        out.append(row(name, friendly, CATEGORIES.get(usda[name]["category"], "Other"), usda_n[name],
+                       popular=rank, plabel=plabel or "", pgrams=pgrams or 0, source="usda"))
+
+    # 2) curated national dishes
+    missing = 0
+    dishes = 0
+    for cuisine, items in CUISINES:
+        for display, english, aliases, src, plabel, pgrams, similar in items:
+            kind, key = src.split(":", 1)
+            if kind == "B":
+                if key not in bls:
+                    print("MISSING dish source:", display, src, file=sys.stderr); missing += 1; continue
+                f, n = bls[key]
+                src_name, src_label, origin = f["name"]["en"], "BLS", "dish:bls"
+                src_alias = "" if similar else f["name"]["de"] + " " + f["name"]["en"]
+            else:
+                if key not in usda_n:
+                    print("MISSING dish source:", display, src, file=sys.stderr); missing += 1; continue
+                n = usda_n[key]
+                src_name, src_label, origin = key, "USDA", "dish:usda"
+                src_alias = "" if similar else key
+            note = f"{cuisine} · {english}"
+            note += f" · ≈ {src_name} ({src_label})" if similar else f" · {src_label}"
+            out.append(row(english, display, cuisine, n, plabel=plabel or "", pgrams=pgrams or 0, source=origin,
+                           aliases=" ".join(x for x in (english, aliases, src_alias) if x), note=note))
+            dishes += 1
+
+    # 3) all other USDA foods
+    for name, r in usda.items():
+        if name not in used:
+            out.append(row(name, "", CATEGORIES.get(r["category"], "Other"), usda_n[name], source="usda"))
+
+    # 4) all BLS foods (English display, German name searchable)
+    for code, (f, n) in bls.items():
+        de, en = f["name"]["de"], f["name"]["en"]
+        out.append(row(de, en or de, bls_category(code, en), n, source="bls", note=f"{de} · BLS (DE)"))
+
+    with open(dst, "w", encoding="utf-8") as fh:
+        fh.write("# MacroBro foods v2 | columns: " + ",".join(COLUMNS) + "\n")
+        fh.write("# USDA FoodData Central SR Legacy (public domain); categories via TempoLife food dataset (CC-BY-4.0)\n")
+        fh.write("# Max Rubner-Institut (2025): Bundeslebensmittelschluessel (BLS), Version 4.0, CC BY 4.0, "
+                 "DOI 10.25826/Data20251217-134202-0; energy calculated with EU 1169/2011 factors\n")
+        for r in out:
+            fh.write("\t".join(r) + "\n")
+    print(f"wrote {len(out)} foods: {len(POPULAR)} popular, {dishes} dishes, {len(usda) - len(used)} other USDA, "
+          f"{len(bls)} BLS; missing dish sources: {missing}")
+    if missing:
+        sys.exit(1)
 
 
 if __name__ == "__main__":
-    main(sys.argv[1], sys.argv[2])
+    main(sys.argv[1], sys.argv[2], sys.argv[3])

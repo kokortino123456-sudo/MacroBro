@@ -8,6 +8,7 @@ import kotlin.math.roundToInt
 val MEALS = listOf("Breakfast", "Lunch", "Dinner", "Snacks")
 
 const val DEFAULT_MODEL = "gemini-flash-latest"
+const val DEFAULT_OPENROUTER_MODEL = "openrouter/free"
 
 data class FoodEntry(
     val id: Long,
@@ -62,8 +63,11 @@ data class ChatMsg(val role: String, val text: String) {
 }
 
 data class Settings(
-    val apiKey: String = "",
+    val provider: String = "gemini", // "gemini" or "openrouter"
+    val apiKey: String = "",          // Gemini key
     val model: String = DEFAULT_MODEL,
+    val openRouterKey: String = "",
+    val openRouterModel: String = DEFAULT_OPENROUTER_MODEL,
     val goalKcal: Int = 2400,
     val goalProtein: Int = 160,
     val goalCarbs: Int = 260,

@@ -101,8 +101,8 @@ fun SnapScreen(vm: AppViewModel, onDone: () -> Unit, onOpenSettings: () -> Unit)
 
         if (!vm.hasKey) {
             SectionCard {
-                Text("Add your free Gemini API key first", fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
-                DimText("Snap and Gym Bro run on Google Gemini. Setup takes about a minute.")
+                Text("Add an AI key first", fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
+                DimText("Snap and Gym Bro run on Google Gemini or OpenRouter, both with free options. Setup takes about a minute.")
                 PrimaryButton("Open Settings", onOpenSettings, shape = RoundedCornerShape(Radius.inner))
             }
         }

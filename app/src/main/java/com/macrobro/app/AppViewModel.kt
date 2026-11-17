@@ -8,7 +8,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.macrobro.app.ai.Gemini
+import com.macrobro.app.ai.Ai
+import com.macrobro.app.ai.AiMessage
+import com.macrobro.app.ai.OpenRouter
+import com.macrobro.app.ai.OrModel
 import com.macrobro.app.ai.Prompts
 import com.macrobro.app.data.AppData
 import com.macrobro.app.data.BarcodeResult
@@ -86,7 +89,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    val hasKey: Boolean get() = settings.apiKey.isNotBlank()
+    /** True when the chosen AI provider has a key. */
+    val hasKey: Boolean get() = Ai.client(settings) != null
 
     private fun newId(): Long = System.currentTimeMillis() * 100 + (idSeq++ % 100)
 
@@ -316,21 +320,18 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         val bmp = snapBitmap
         val note = snapNote.trim()
         if (bmp == null && note.isEmpty()) { snapError = "Take a photo or describe what you ate."; return }
-        if (!hasKey) { snapError = "Add your Gemini API key in Settings first."; return }
+        val client = Ai.client(settings)
+        if (client == null) { snapError = Ai.missingKeyMessage(settings); return }
         if (snapLoading) return
         snapLoading = true
         snapError = null
-        val s = settings
         viewModelScope.launch {
             try {
                 val text = Prompts.snapUserText(note, hasPhoto = bmp != null)
-                val message = if (bmp != null) {
-                    val b64 = withContext(Dispatchers.Default) { ImageUtil.toJpegBase64(bmp) }
-                    Gemini.userTextAndImage(text, b64)
-                } else Gemini.userText(text)
-                val reply = Gemini.generate(
-                    s.apiKey, s.model, Prompts.SNAP_SYSTEM, JSONArray().put(message),
-                    jsonOutput = true, temperature = 0.2,
+                val b64 = if (bmp != null) withContext(Dispatchers.Default) { ImageUtil.toJpegBase64(bmp) } else null
+                val reply = client.complete(
+                    Prompts.SNAP_SYSTEM, listOf(AiMessage("user", text, b64)),
+                    json = true, temperature = 0.2,
                 )
                 val (items, notes) = parseSnap(reply)
                 snapItems = items
@@ -378,7 +379,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun sendBro(text: String) {
         val msg = text.trim()
         if (msg.isEmpty() || broLoading) return
-        if (!hasKey) { broError = "Add your Gemini API key in Settings first."; return }
+        val client = Ai.client(settings)
+        if (client == null) { broError = Ai.missingKeyMessage(settings); return }
         chat = chat + ChatMsg("user", msg)
         persist()
         broLoading = true
@@ -389,7 +391,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         val history = chat.takeLast(24)
         viewModelScope.launch {
             try {
-                val reply = Gemini.generate(s.apiKey, s.model, system, toContents(history), temperature = 0.9)
+                val reply = client.complete(system, toMessages(history), json = false, temperature = 0.9)
                 chat = chat + ChatMsg("model", reply)
                 persist()
             } catch (e: Exception) {
@@ -406,28 +408,30 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         persist()
     }
 
-    /** Gemini wants user/model turns; merge repeats and start with a user turn. */
-    private fun toContents(history: List<ChatMsg>): JSONArray {
-        val merged = mutableListOf<ChatMsg>()
+    /** Alternate user/assistant turns: merge repeats and start with a user turn. */
+    private fun toMessages(history: List<ChatMsg>): List<AiMessage> {
+        val merged = mutableListOf<AiMessage>()
         for (m in history) {
-            val role = if (m.role == "model") "model" else "user"
-            if (merged.isEmpty() && role == "model") continue
+            val role = if (m.role == "model") "assistant" else "user"
+            if (merged.isEmpty() && role == "assistant") continue
             if (merged.isNotEmpty() && merged.last().role == role) {
-                merged[merged.size - 1] = ChatMsg(role, merged.last().text + "\n\n" + m.text)
-            } else merged.add(ChatMsg(role, m.text))
+                merged[merged.size - 1] = AiMessage(role, merged.last().text + "\n\n" + m.text)
+            } else merged.add(AiMessage(role, m.text))
         }
-        val arr = JSONArray()
-        merged.forEach {
-            arr.put(JSONObject().put("role", it.role).put("parts", JSONArray().put(JSONObject().put("text", it.text))))
-        }
-        return arr
+        return merged
     }
 
-    /** Sends a tiny request to check the key and model. Returns (ok, message). */
-    suspend fun testConnection(apiKey: String, model: String): Pair<Boolean, String> = try {
-        Gemini.generate(apiKey, model, null, JSONArray().put(Gemini.userText("Reply with just: OK")), temperature = 0.0)
-        true to "Key works. Gemini is connected."
-    } catch (e: Exception) {
-        false to (e.message ?: "Couldn't connect.")
+    /** Sends a tiny request to check a key and model. Returns (ok, message). */
+    suspend fun testConnection(test: Settings): Pair<Boolean, String> {
+        val client = Ai.client(test) ?: return false to "Paste a key first."
+        return try {
+            client.complete(null, listOf(AiMessage("user", "Reply with just: OK")), json = false, temperature = 0.0)
+            true to (if (test.provider == Ai.OPENROUTER) "Key works. OpenRouter is connected." else "Key works. Gemini is connected.")
+        } catch (e: Exception) {
+            false to (e.message ?: "Couldn't connect.")
+        }
     }
+
+    /** OpenRouter's public model list, for the model picker. */
+    suspend fun openRouterModels(): List<OrModel> = OpenRouter.listModels()
 }

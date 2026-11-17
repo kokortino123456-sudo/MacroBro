@@ -32,8 +32,12 @@ class Store(context: Context) {
     fun loadSettings(): Settings {
         val d = Settings()
         return Settings(
+            provider = prefs.getString("provider", d.provider) ?: d.provider,
             apiKey = prefs.getString("apiKey", "") ?: "",
             model = prefs.getString("model", d.model)?.ifBlank { d.model } ?: d.model,
+            openRouterKey = prefs.getString("openRouterKey", "") ?: "",
+            openRouterModel = prefs.getString("openRouterModel", d.openRouterModel)?.ifBlank { d.openRouterModel }
+                ?: d.openRouterModel,
             goalKcal = prefs.getInt("goalKcal", d.goalKcal),
             goalProtein = prefs.getInt("goalProtein", d.goalProtein),
             goalCarbs = prefs.getInt("goalCarbs", d.goalCarbs),
@@ -50,8 +54,11 @@ class Store(context: Context) {
 
     fun saveSettings(s: Settings) {
         prefs.edit()
+            .putString("provider", s.provider)
             .putString("apiKey", s.apiKey)
             .putString("model", s.model)
+            .putString("openRouterKey", s.openRouterKey)
+            .putString("openRouterModel", s.openRouterModel)
             .putInt("goalKcal", s.goalKcal)
             .putInt("goalProtein", s.goalProtein)
             .putInt("goalCarbs", s.goalCarbs)
@@ -102,7 +109,7 @@ class Store(context: Context) {
             )
         }
 
-        /** Backup file: all data plus settings, but never the API key. */
+        /** Backup file: all data plus settings, but never the API keys. */
         fun backupJson(d: AppData, s: Settings): String {
             val root = dataToJson(d)
                 .put("app", BACKUP_APP)
@@ -118,7 +125,7 @@ class Store(context: Context) {
             return root.toString(2)
         }
 
-        /** Parses a backup file. Keeps the current API key and model. */
+        /** Parses a backup file. Keeps the current AI provider, keys and models. */
         fun parseBackup(text: String, current: Settings): Pair<AppData, Settings> {
             val root = try { JSONObject(text) } catch (e: Exception) {
                 throw IllegalArgumentException("That file isn't a MacroBro backup.")

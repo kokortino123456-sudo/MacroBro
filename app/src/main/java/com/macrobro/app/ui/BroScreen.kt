@@ -102,7 +102,7 @@ fun BroScreen(vm: AppViewModel, onOpenSettings: () -> Unit) {
                         Bubble(ChatMsg("model", "Yo bro! I'm your Gym Bro. Ask me about training, food, or how today's macros are looking. Let's get those gains."))
                         if (!vm.hasKey) {
                             SectionCard {
-                                Text("Add your Gemini API key to chat", fontWeight = FontWeight.SemiBold)
+                                Text("Add an AI key (Gemini or OpenRouter) to chat", fontWeight = FontWeight.SemiBold)
                                 PrimaryButton("Open Settings", onOpenSettings, shape = RoundedCornerShape(Radius.inner))
                             }
                         } else {
