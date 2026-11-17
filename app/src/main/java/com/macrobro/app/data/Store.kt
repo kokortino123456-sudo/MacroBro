@@ -95,7 +95,9 @@ class Store(context: Context) {
                 entries = list("entries", FoodEntry::fromJson),
                 chat = list("chat", ChatMsg::fromJson),
                 customFoods = list("customFoods", LibFood::customFromJson),
-                weights = list("weights", WeightEntry::fromJson).filter { it.kg > 0 && it.date.isNotBlank() },
+                weights = list("weights", WeightEntry::fromJson)
+                    .filter { it.kg > 0 && runCatching { java.time.LocalDate.parse(it.date) }.isSuccess }
+                    .distinctBy { it.date },
                 water = water,
             )
         }

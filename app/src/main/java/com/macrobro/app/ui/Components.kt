@@ -226,7 +226,7 @@ fun Ring(
 fun StatTile(label: String, value: String, modifier: Modifier = Modifier, sub: String? = null) {
     Column(modifier.tile().padding(Space.m), verticalArrangement = Arrangement.spacedBy(2.dp)) {
         Text(label, color = TextDim, fontSize = 13.sp, maxLines = 1)
-        Text(value, fontSize = 24.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+        Text(value, fontSize = 22.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
         if (sub != null) Text(sub, color = TextMuted, fontSize = 12.sp, maxLines = 1)
     }
 }

@@ -27,7 +27,7 @@ object OpenFoodFacts {
     suspend fun lookup(barcode: String): BarcodeResult = withContext(Dispatchers.IO) {
         val code = barcode.filter { it.isDigit() }
         if (code.isEmpty()) return@withContext BarcodeResult.NotFound
-        val (status, body) = get("$BASE/api/v2/product/$code.json?fields=$FIELDS")
+        val (status, body) = get("$BASE/api/v2/product/$code?fields=$FIELDS")
         if (status == 404) return@withContext BarcodeResult.NotFound
         if (status !in 200..299) throw IOException("Open Food Facts error (HTTP $status). Try again later.")
         val root = try { JSONObject(body) } catch (e: Exception) {

@@ -1,5 +1,6 @@
 package com.macrobro.app.ui
 
+import androidx.compose.foundation.layout.imePadding
 import android.content.ActivityNotFoundException
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -91,6 +92,7 @@ fun SnapScreen(vm: AppViewModel, onDone: () -> Unit, onOpenSettings: () -> Unit)
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .imePadding()
             .verticalScroll(rememberScrollState())
             .padding(Space.l),
         verticalArrangement = Arrangement.spacedBy(Space.m),

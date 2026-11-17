@@ -1,5 +1,6 @@
 package com.macrobro.app.ui
 
+import androidx.compose.foundation.layout.imePadding
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -140,6 +141,7 @@ fun SettingsScreen(vm: AppViewModel) {
     Column(
         Modifier
             .fillMaxSize()
+            .imePadding()
             .verticalScroll(rememberScrollState())
             .padding(Space.l),
         verticalArrangement = Arrangement.spacedBy(Space.m),

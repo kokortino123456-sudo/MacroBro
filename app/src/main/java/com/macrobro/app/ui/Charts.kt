@@ -1,5 +1,7 @@
 package com.macrobro.app.ui
 
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.getValue
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -61,15 +63,16 @@ fun CaloriesChart(
     plotHeight: Dp = 160.dp,
 ) {
     val n = days.size.coerceAtLeast(1)
+    val select by rememberUpdatedState(onSelect)
     val top = max(goal * 1.15f, (days.maxOfOrNull { it.kcal } ?: 0) * 1.08f).coerceAtLeast(500f)
     Column(modifier) {
         Canvas(
             Modifier
                 .fillMaxWidth()
                 .height(plotHeight)
-                .pointerInput(n) {
+                .pointerInput(days) {
                     detectTapGestures { pos ->
-                        onSelect((pos.x / (size.width.toFloat() / n)).toInt().coerceIn(0, n - 1))
+                        select((pos.x / (size.width.toFloat() / n)).toInt().coerceIn(0, n - 1))
                     }
                 }
         ) {
@@ -160,6 +163,7 @@ fun WeightChart(
     plotHeight: Dp = 160.dp,
 ) {
     if (points.size < 2) return
+    val select by rememberUpdatedState(onSelect)
     val xs = points.map { LocalDate.parse(it.date).toEpochDay().toFloat() }
     val minX = xs.first()
     val spanX = max(1f, xs.last() - minX)
@@ -188,11 +192,11 @@ fun WeightChart(
                 Modifier
                     .weight(1f)
                     .height(plotHeight)
-                    .pointerInput(points.size) {
+                    .pointerInput(points) {
                         detectTapGestures { pos ->
                             val w = size.width.toFloat()
                             val nearest = xs.indices.minByOrNull { abs((xs[it] - minX) / spanX * w - pos.x) } ?: 0
-                            onSelect(nearest)
+                            select(nearest)
                         }
                     }
             ) {

@@ -1,5 +1,6 @@
 package com.macrobro.app.ui
 
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -78,6 +79,7 @@ fun ProgressScreen(vm: AppViewModel) {
     Column(
         Modifier
             .fillMaxSize()
+            .imePadding()
             .verticalScroll(rememberScrollState())
             .padding(Space.l),
         verticalArrangement = Arrangement.spacedBy(Space.m),

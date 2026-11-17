@@ -1,5 +1,6 @@
 package com.macrobro.app.ui
 
+import androidx.compose.foundation.layout.imePadding
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -164,7 +165,7 @@ fun AddFoodScreen(vm: AppViewModel, initialMeal: String, startScan: Boolean, onC
     val popular = remember(library) { library.filter { it.popular > 0 }.sortedBy { it.popular } }
     val showOnline = query.isNotBlank() && filter == "All"
 
-    Column(Modifier.fillMaxSize()) {
+    Column(Modifier.fillMaxSize().imePadding()) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.fillMaxWidth().padding(start = Space.xs, end = Space.xs, top = Space.xs),
